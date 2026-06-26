@@ -20,6 +20,17 @@ router.get('/mails', (req: Request, res: Response) => {
   }
 });
 
+// 全部标记已读
+router.put('/mails/read-all', (req: Request, res: Response) => {
+  try {
+    const accountId = req.query.accountId as string | undefined;
+    const count = mailService.markAllRead(accountId);
+    res.json({ success: true, data: { count } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || '操作失败' });
+  }
+});
+
 // 批量标记已读
 router.put('/mails/batch/read', (req: Request, res: Response) => {
   try {

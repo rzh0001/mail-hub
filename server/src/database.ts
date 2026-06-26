@@ -38,6 +38,8 @@ function initTables(): void {
       smtp_secure INTEGER NOT NULL DEFAULT 1,
       auth_code TEXT NOT NULL,
       provider TEXT NOT NULL DEFAULT '',
+      avatar_color TEXT NOT NULL DEFAULT '',
+      avatar_name TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -68,7 +70,49 @@ function initTables(): void {
     CREATE INDEX IF NOT EXISTS idx_mails_uid ON mails(account_id, message_uid);
     CREATE INDEX IF NOT EXISTS idx_mails_received ON mails(received_at DESC);
     CREATE INDEX IF NOT EXISTS idx_mails_subject ON mails(subject);
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS verification_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('subject_keyword', 'sender_pattern')),
+      value TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS forwarding_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('subject_keyword', 'sender_pattern')),
+      value TEXT NOT NULL,
+      target_email TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS trash_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('subject_keyword', 'sender_pattern')),
+      value TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
   `);
+
+  // 迁移：为已有数据库添加新字段
+  try { database.exec("ALTER TABLE accounts ADD COLUMN avatar_color TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { database.exec("ALTER TABLE accounts ADD COLUMN avatar_name TEXT NOT NULL DEFAULT ''"); } catch {}
+
+  // 初始化默认设置
+  const insertSetting = database.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  insertSetting.run('sync_interval', '2');
+  insertSetting.run('sync_max_count', '50');
+  insertSetting.run('auto_mark_verification', 'true');
+  insertSetting.run('verification_forward_enabled', 'false');
+  insertSetting.run('verification_forward_targets', '[]');
 }
 
 export function closeDatabase(): void {

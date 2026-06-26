@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { getDatabase } from '../database';
 import { MAIL_PROVIDERS } from '../types';
-import type { AccountRow, AccountDTO, CreateAccountInput } from '../types';
+import type { AccountRow, AccountDTO, CreateAccountInput, UpdateAccountInput } from '../types';
 
 // 将数据库行转换为API响应
 function toDTO(row: AccountRow): AccountDTO {
@@ -16,6 +16,8 @@ function toDTO(row: AccountRow): AccountDTO {
     smtpPort: row.smtp_port,
     smtpSecure: row.smtp_secure === 1,
     provider: row.provider,
+    avatarColor: row.avatar_color || '',
+    avatarName: row.avatar_name || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -57,12 +59,14 @@ export function createAccount(input: CreateAccountInput): AccountDTO {
     // 更新已有账户
     db.prepare(`
       UPDATE accounts SET name = ?, imap_host = ?, imap_port = ?, imap_secure = ?,
-        smtp_host = ?, smtp_port = ?, smtp_secure = ?, auth_code = ?, provider = ?, updated_at = ?
+        smtp_host = ?, smtp_port = ?, smtp_secure = ?, auth_code = ?, provider = ?,
+        avatar_color = ?, avatar_name = ?, updated_at = ?
       WHERE email = ?
     `).run(
       input.name, config.imapHost, config.imapPort, config.imapSecure ? 1 : 0,
       config.smtpHost, config.smtpPort, config.smtpSecure ? 1 : 0,
-      input.authCode, config.provider, now, input.email
+      input.authCode, config.provider,
+      input.avatarColor || '', input.avatarName || '', now, input.email
     );
 
     const row = db.prepare('SELECT * FROM accounts WHERE email = ?').get(input.email) as AccountRow;
@@ -82,13 +86,15 @@ export function createAccount(input: CreateAccountInput): AccountDTO {
     smtp_secure: config.smtpSecure ? 1 : 0,
     auth_code: input.authCode,
     provider: config.provider,
+    avatar_color: input.avatarColor || '',
+    avatar_name: input.avatarName || '',
     created_at: now,
     updated_at: now,
   };
 
   db.prepare(`
-    INSERT INTO accounts (id, name, email, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, auth_code, provider, created_at, updated_at)
-    VALUES (@id, @name, @email, @imap_host, @imap_port, @imap_secure, @smtp_host, @smtp_port, @smtp_secure, @auth_code, @provider, @created_at, @updated_at)
+    INSERT INTO accounts (id, name, email, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, auth_code, provider, avatar_color, avatar_name, created_at, updated_at)
+    VALUES (@id, @name, @email, @imap_host, @imap_port, @imap_secure, @smtp_host, @smtp_port, @smtp_secure, @auth_code, @provider, @avatar_color, @avatar_name, @created_at, @updated_at)
   `).run(row);
 
   return toDTO(row);
@@ -99,6 +105,12 @@ export function getAllAccounts(): AccountDTO[] {
   const db = getDatabase();
   const rows = db.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all() as AccountRow[];
   return rows.map(toDTO);
+}
+
+// 获取所有账户原始行（含授权码，用于调度器）
+export function getAllAccountRows(): AccountRow[] {
+  const db = getDatabase();
+  return db.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all() as AccountRow[];
 }
 
 // 获取单个账户
@@ -113,6 +125,25 @@ export function getAccountRow(id: string): AccountRow | null {
   const db = getDatabase();
   const row = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow | undefined;
   return row || null;
+}
+
+// 更新账户基本信息
+export function updateAccount(id: string, input: UpdateAccountInput): AccountDTO | null {
+  const db = getDatabase();
+  const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow | undefined;
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const name = input.name !== undefined ? input.name : existing.name;
+  const avatarColor = input.avatarColor !== undefined ? input.avatarColor : existing.avatar_color;
+  const avatarName = input.avatarName !== undefined ? input.avatarName : existing.avatar_name;
+
+  db.prepare(`
+    UPDATE accounts SET name = ?, avatar_color = ?, avatar_name = ?, updated_at = ? WHERE id = ?
+  `).run(name, avatarColor, avatarName, now, id);
+
+  const updated = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow;
+  return toDTO(updated);
 }
 
 // 删除账户
@@ -138,6 +169,8 @@ export function getAccountConfig(id: string) {
     smtpHost: row.smtp_host,
     smtpPort: row.smtp_port,
     smtpSecure: row.smtp_secure === 1,
+    avatarColor: row.avatar_color || '',
+    avatarName: row.avatar_name || '',
   };
 }
 
@@ -156,6 +189,8 @@ export function exportAllAccounts() {
     smtpHost: r.smtp_host,
     smtpPort: r.smtp_port,
     smtpSecure: r.smtp_secure === 1,
+    avatarColor: r.avatar_color || '',
+    avatarName: r.avatar_name || '',
   }));
 }
 
@@ -194,5 +229,7 @@ export function getProviders() {
     smtpHost: val.smtpHost,
     smtpPort: val.smtpPort,
     smtpSecure: val.smtpSecure,
+    sentFolder: val.sentFolder,
+    trashFolder: val.trashFolder,
   }));
 }

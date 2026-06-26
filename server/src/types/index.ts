@@ -1,5 +1,5 @@
 // 邮箱提供商预设配置
-export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean }> = {
+export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; sentFolder: string; trashFolder: string }> = {
   '163': {
     name: '163邮箱',
     imapHost: 'imap.163.com',
@@ -8,6 +8,8 @@ export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; im
     smtpHost: 'smtp.163.com',
     smtpPort: 465,
     smtpSecure: true,
+    sentFolder: '已发送',
+    trashFolder: '已删除',
   },
   'qq': {
     name: 'QQ邮箱',
@@ -17,6 +19,8 @@ export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; im
     smtpHost: 'smtp.qq.com',
     smtpPort: 465,
     smtpSecure: true,
+    sentFolder: '已发送',
+    trashFolder: '已删除',
   },
   'gmail': {
     name: 'Gmail',
@@ -26,6 +30,8 @@ export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; im
     smtpHost: 'smtp.gmail.com',
     smtpPort: 465,
     smtpSecure: true,
+    sentFolder: '[Gmail]/已发送邮件',
+    trashFolder: '[Gmail]/已删除邮件',
   },
   'outlook': {
     name: 'Outlook',
@@ -35,6 +41,8 @@ export const MAIL_PROVIDERS: Record<string, { name: string; imapHost: string; im
     smtpHost: 'smtp.office365.com',
     smtpPort: 587,
     smtpSecure: false,
+    sentFolder: 'Sent Items',
+    trashFolder: 'Deleted Items',
   },
 };
 
@@ -51,6 +59,8 @@ export interface AccountRow {
   smtp_secure: number;
   auth_code: string;
   provider: string;
+  avatar_color: string;
+  avatar_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +77,8 @@ export interface AccountDTO {
   smtpPort: number;
   smtpSecure: boolean;
   provider: string;
+  avatarColor: string;
+  avatarName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +95,8 @@ export interface CreateAccountInput {
   smtpHost?: string;
   smtpPort?: number;
   smtpSecure?: boolean;
+  avatarColor?: string;
+  avatarName?: string;
 }
 
 // 数据库行 - 邮件
@@ -112,6 +126,8 @@ export interface MailSummary {
   accountId: string;
   accountName: string;
   accountEmail: string;
+  avatarColor: string;
+  avatarName: string;
   folder: string;
   fromName: string;
   fromAddress: string;
@@ -120,6 +136,7 @@ export interface MailSummary {
   isRead: boolean;
   isFlagged: boolean;
   hasAttachments: boolean;
+  verificationCode: string;
 }
 
 // 邮件附件
@@ -138,6 +155,16 @@ export interface MailDetail extends MailSummary {
   attachments: Attachment[];
 }
 
+// 更新账户输入
+export interface UpdateAccountInput {
+  name?: string;
+  avatarColor?: string;
+  avatarName?: string;
+}
+
+// 系统设置（键值对）
+export type SettingsMap = Record<string, string>;
+
 // 发送邮件输入
 export interface SendMailInput {
   accountId: string;
@@ -147,4 +174,29 @@ export interface SendMailInput {
   subject: string;
   body: string;
   isHtml?: boolean;
+}
+
+// 转发规则（数据库行）
+export interface ForwardingRuleRow {
+  id: number;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
+  target_email: string;
+  enabled: number;
+  created_at: string;
+}
+
+// 垃圾箱规则（数据库行）
+export interface TrashRuleRow {
+  id: number;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
+  enabled: number;
+  created_at: string;
+}
+
+// 邮箱提供商文件夹配置
+export interface ProviderFolderConfig {
+  sentFolder: string;
+  trashFolder: string;
 }

@@ -4,6 +4,101 @@ import { simpleParser, type AddressObject } from 'mailparser';
 import { v4 as uuid } from 'uuid';
 import { getDatabase } from '../database';
 import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, SendMailInput } from '../types';
+import { matchesTrashRule } from './trash.service';
+
+// ---------- 验证码检测（内置规则 + 数据库自定义规则）----------
+// 内置规则源码（用于显示 & 编译为正则）
+const BUILTIN_KEYWORDS_SRC = [
+  '验证码', '验证', '认证码', '安全验证', '登录验证', '注册验证',
+  '动态密码', '一次性密码', '安全码', '校验码',
+  'verification\\s*code', 'otp', 'one\\.?time', 'auth\\s*code',
+  '2fa', 'two\\.?factor', 'confirm.*code', 'security\\s*code',
+  'temporary\\s*password', 'magic\\s*link', 'login\\s*link', 'passcode',
+  'apple.*(?:id|code|验证|verify)', 'amazon.*(?:code|otp|验证)',
+];
+const BUILTIN_SENDERS_SRC = [
+  'noreply', 'no\\.?reply', 'apple\\.com$', 'appleid\\.apple\\.com$', 'amazon\\.',
+];
+
+const BUILTIN_KEYWORDS = BUILTIN_KEYWORDS_SRC.map(s => new RegExp(s, 'i'));
+const BUILTIN_SENDERS = BUILTIN_SENDERS_SRC.map(s => new RegExp(s, 'i'));
+
+const BUILTIN_EXTRACT = [
+  /验证码[：:]\s*(\d{4,8})/,
+  /验证码.*?[是:：]?\s*(\d{4,8})/,
+  /(?:apple|apply)\s*id\s*(?:code|验证码)[：:\s]*(\d{4,8})/i,
+  /(?:code|otp|pin|passcode)[：:\s]*(\d{4,8})/i,
+  /(\d{4,8})\s*(?:is|为|是)\s*(?:your\s+)?(?:verification|code|otp|apple)/i,
+  /(?:code|otp)\s+is\s+(\d{4,8})/i,
+  /(\d{4,8})/,
+];
+
+// 导出的内置规则列表（用于设置页面展示）
+export function getBuiltinRules(): Array<{ id: string; type: 'subject_keyword' | 'sender_pattern'; value: string }> {
+  const kws = BUILTIN_KEYWORDS_SRC.map((v, i) => ({ id: `kw_${i}`, type: 'subject_keyword' as const, value: v }));
+  const snds = BUILTIN_SENDERS_SRC.map((v, i) => ({ id: `sender_${i}`, type: 'sender_pattern' as const, value: v }));
+  return [...kws, ...snds];
+}
+
+interface VCRuleSet {
+  keywords: RegExp[];
+  senders: RegExp[];
+  disabledBuiltin: Set<string>;
+}
+
+function loadDisabledBuiltin(): Set<string> {
+  try {
+    const db = getDatabase();
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'disabled_builtin_rules'").get() as { value: string } | undefined;
+    if (row && row.value) {
+      const arr: string[] = JSON.parse(row.value);
+      return new Set(arr);
+    }
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function loadCustomRules(): VCRuleSet {
+  const disabledBuiltin = loadDisabledBuiltin();
+  try {
+    const db = getDatabase();
+    const rows = db.prepare('SELECT type, value FROM verification_rules WHERE enabled = 1').all() as { type: string; value: string }[];
+    const keywords: RegExp[] = [];
+    const senders: RegExp[] = [];
+    for (const r of rows) {
+      try {
+        const re = new RegExp(r.value, 'i');
+        if (r.type === 'subject_keyword') keywords.push(re);
+        else if (r.type === 'sender_pattern') senders.push(re);
+      } catch { /* 忽略无效正则 */ }
+    }
+    return { keywords, senders, disabledBuiltin };
+  } catch {
+    return { keywords: [], senders: [], disabledBuiltin };
+  }
+}
+
+export function detectVerificationCode(subject: string, bodyText: string, fromAddress: string, customRules?: VCRuleSet): string {
+  const cr = customRules || { keywords: [], senders: [], disabledBuiltin: new Set() };
+
+  // 过滤掉已关闭的内置规则
+  const enabledKeywords = BUILTIN_KEYWORDS.filter((_, i) => !cr.disabledBuiltin.has(`kw_${i}`));
+  const enabledSenders = BUILTIN_SENDERS.filter((_, i) => !cr.disabledBuiltin.has(`sender_${i}`));
+
+  const allKeywords = [...enabledKeywords, ...cr.keywords];
+  const allSenders = [...enabledSenders, ...cr.senders];
+
+  const isVC = allKeywords.some(p => p.test(subject)) || allSenders.some(p => p.test(fromAddress));
+  if (!isVC) return '';
+
+  const textToSearch = `${bodyText}\n${subject}`;
+  for (const p of BUILTIN_EXTRACT) {
+    const m = textToSearch.match(p);
+    if (m) return m[1];
+  }
+  return '';
+}
+// ---------- 验证码检测结束 ----------
 
 // 安全地从中提取地址列表，兼容 AddressObject | AddressObject[]
 function extractAddresses(addr: AddressObject | AddressObject[] | undefined): Array<{ name?: string; address?: string }> {
@@ -15,7 +110,7 @@ function extractAddresses(addr: AddressObject | AddressObject[] | undefined): Ar
 }
 
 // 从IMAP同步邮件到本地数据库
-export async function syncMails(account: AccountRow, folder: string = 'INBOX', maxCount: number = 50): Promise<number> {
+export async function syncMails(account: AccountRow, folder: string = 'INBOX', maxCount: number = 50): Promise<{ synced: number; mailIds: string[] }> {
   const client = new ImapFlow({
     host: account.imap_host,
     port: account.imap_port,
@@ -28,13 +123,14 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
   });
 
   let synced = 0;
+  const mailIds: string[] = [];
 
   try {
     await client.connect();
     const mailbox = await client.mailboxOpen(folder);
     const total = mailbox.exists;
 
-    if (total === 0) return 0;
+    if (total === 0) return { synced: 0, mailIds: [] };
 
     const db = getDatabase();
 
@@ -77,23 +173,31 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
           size: att.size || 0,
         }));
 
+      const mailId = uuid();
+      mailIds.push(mailId);
+
+      // 检查垃圾箱规则
+      const subject = parsed.subject || '';
+      const fromAddress = fromAddr?.address || '';
+      const isDeletedByRule = matchesTrashRule(subject, fromAddress) ? 1 : 0;
+
       const mail: MailRow = {
-        id: uuid(),
+        id: mailId,
         account_id: account.id,
         message_uid: msg.uid,
         folder,
         from_name: fromAddr?.name || '',
-        from_address: fromAddr?.address || '',
+        from_address: fromAddress,
         to_list: JSON.stringify(toList),
         cc_list: JSON.stringify(ccList),
-        subject: parsed.subject || '',
+        subject,
         body_text: parsed.text || '',
         body_html: parsed.html || '',
         attachments: JSON.stringify(attachments),
         received_at: receivedAt,
         is_read: msg.flags?.has('\\Seen') ? 1 : 0,
         is_flagged: msg.flags?.has('\\Flagged') ? 1 : 0,
-        is_deleted: 0,
+        is_deleted: isDeletedByRule,
         created_at: new Date().toISOString(),
       };
 
@@ -104,11 +208,16 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
           @subject, @body_text, @body_html, @attachments, @received_at, @is_read, @is_flagged, @is_deleted, @created_at)
       `).run(mail);
 
+      // 垃圾箱规则匹配 → 同步删除到 IMAP 服务器
+      if (isDeletedByRule) {
+        try { await client.messageFlagsAdd({ uid: msg.uid }, ['\\Deleted']); } catch { /* ignore */ }
+      }
+
       synced++;
     }
 
     await client.logout();
-    return synced;
+    return { synced, mailIds };
   } catch (err) {
     // 确保断开连接
     try { await client.logout(); } catch { /* ignore */ }
@@ -175,6 +284,8 @@ export function markRead(mailId: string, isRead: boolean): void {
   db.prepare('UPDATE mails SET is_read = ? WHERE id = ?').run(isRead ? 1 : 0, mailId);
   if (isRead) {
     syncReadToServer(mail.account_id, [mail.message_uid]);
+  } else {
+    syncServerFlags(mail.account_id, mail.folder, [mail.message_uid], '\\Seen', false);
   }
 }
 
@@ -197,31 +308,141 @@ export function batchMarkRead(mailIds: string[]): void {
   }
 }
 
-// 批量删除
+// 全部标记已读（按账户）
+export function markAllRead(accountId?: string): number {
+  const db = getDatabase();
+
+  let where = 'WHERE is_deleted = 0 AND is_read = 0';
+  const params: any[] = [];
+
+  if (accountId) {
+    where += ' AND account_id = ?';
+    params.push(accountId);
+  }
+
+  // 获取受影响的邮件用于 IMAP 同步
+  const mails = db.prepare(`SELECT account_id, message_uid FROM mails ${where}`).all(...params) as any[];
+  const grouped: Record<string, number[]> = {};
+  for (const m of mails) {
+    if (!grouped[m.account_id]) grouped[m.account_id] = [];
+    grouped[m.account_id].push(m.message_uid);
+  }
+
+  // 更新
+  const result = db.prepare(`UPDATE mails SET is_read = 1 ${where}`).run(...params);
+
+  // 同步到 IMAP
+  for (const [accId, uids] of Object.entries(grouped)) {
+    syncReadToServer(accId, uids);
+  }
+
+  return result.changes;
+}
+
+// 通过IMAP将删除同步到服务器
+async function syncDeleteToServer(accountId: string, folder: string, messageUids: number[]): Promise<void> {
+  if (messageUids.length === 0) return;
+  const db = getDatabase();
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as AccountRow | undefined;
+  if (!account) return;
+
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: account.imap_port,
+    secure: account.imap_secure === 1,
+    auth: { user: account.email, pass: account.auth_code },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    await client.mailboxOpen(folder);
+    for (const uid of messageUids) {
+      try { await client.messageFlagsAdd({ uid }, ['\\Deleted']); } catch { /* 单个失败跳过 */ }
+    }
+    await client.logout();
+  } catch {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+}
+
+// 批量删除（本地 + IMAP）
 export function batchMarkDeleted(mailIds: string[]): void {
   if (mailIds.length === 0) return;
   const db = getDatabase();
   const placeholders = mailIds.map(() => '?').join(',');
   db.prepare(`UPDATE mails SET is_deleted = 1 WHERE id IN (${placeholders})`).run(...mailIds);
+
+  // 按账户+文件夹分组同步到IMAP
+  const mails = db.prepare(`SELECT account_id, folder, message_uid FROM mails WHERE id IN (${placeholders})`).all(...mailIds) as any[];
+  const grouped: Record<string, { folder: string; uids: number[] }> = {};
+  for (const m of mails) {
+    const key = `${m.account_id}|${m.folder}`;
+    if (!grouped[key]) grouped[key] = { folder: m.folder, uids: [] };
+    grouped[key].uids.push(m.message_uid);
+  }
+  for (const [key, val] of Object.entries(grouped)) {
+    const accountId = key.split('|')[0];
+    syncDeleteToServer(accountId, val.folder, val.uids);
+  }
 }
 
-// 标记星标
+// 通过IMAP添加或移除标记
+async function syncServerFlags(accountId: string, folder: string, messageUids: number[], flag: string, add: boolean): Promise<void> {
+  if (messageUids.length === 0) return;
+  const db = getDatabase();
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as AccountRow | undefined;
+  if (!account) return;
+
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: account.imap_port,
+    secure: account.imap_secure === 1,
+    auth: { user: account.email, pass: account.auth_code },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    await client.mailboxOpen(folder);
+    for (const uid of messageUids) {
+      try {
+        if (add) {
+          await client.messageFlagsAdd({ uid }, [flag]);
+        } else {
+          await client.messageFlagsRemove({ uid }, [flag]);
+        }
+      } catch { /* 单个失败跳过 */ }
+    }
+    await client.logout();
+  } catch {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+}
+
+// 标记星标（本地 + IMAP）
 export function markFlagged(mailId: string, isFlagged: boolean): void {
   const db = getDatabase();
+  const mail = db.prepare('SELECT * FROM mails WHERE id = ?').get(mailId) as any;
+  if (!mail) return;
   db.prepare('UPDATE mails SET is_flagged = ? WHERE id = ?').run(isFlagged ? 1 : 0, mailId);
+  syncServerFlags(mail.account_id, mail.folder, [mail.message_uid], '\\Flagged', isFlagged);
 }
 
-// 标记删除
+// 标记删除（本地 + IMAP）
 export function markDeleted(mailId: string): void {
   const db = getDatabase();
+  const mail = db.prepare('SELECT * FROM mails WHERE id = ?').get(mailId) as any;
+  if (!mail) return;
   db.prepare('UPDATE mails SET is_deleted = 1 WHERE id = ?').run(mailId);
+  syncDeleteToServer(mail.account_id, mail.folder, [mail.message_uid]);
 }
 
 // 获取邮件列表
 export function getMailList(accountId?: string, folder?: string, page: number = 1, pageSize: number = 20): { mails: MailSummary[], total: number } {
   const db = getDatabase();
 
-  let where = 'WHERE m.is_deleted = 0';
+  let where = folder === '已删除' ? 'WHERE 1=1' : 'WHERE m.is_deleted = 0';
   const params: any[] = [];
 
   if (accountId) {
@@ -242,7 +463,7 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
   params.push(pageSize, offset);
 
   const rows = db.prepare(`
-    SELECT m.*, a.name as account_name, a.email as account_email
+    SELECT m.*, a.name as account_name, a.email as account_email, a.avatar_color, a.avatar_name
     FROM mails m
     LEFT JOIN accounts a ON m.account_id = a.id
     ${where}
@@ -250,11 +471,14 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
     LIMIT ? OFFSET ?
   `).all(...params) as any[];
 
+  const customRules = loadCustomRules();
   const mails: MailSummary[] = rows.map(r => ({
     id: r.id,
     accountId: r.account_id,
     accountName: r.account_name || '',
     accountEmail: r.account_email || '',
+    avatarColor: r.avatar_color || '',
+    avatarName: r.avatar_name || '',
     folder: r.folder,
     fromName: r.from_name,
     fromAddress: r.from_address,
@@ -263,6 +487,7 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
     isRead: r.is_read === 1,
     isFlagged: r.is_flagged === 1,
     hasAttachments: JSON.parse(r.attachments || '[]').length > 0,
+    verificationCode: detectVerificationCode(r.subject || '', r.body_text || '', r.from_address || '', customRules),
   }));
 
   return { mails, total };
@@ -273,7 +498,7 @@ export function getMailDetail(mailId: string): MailDetail | null {
   const db = getDatabase();
 
   const row = db.prepare(`
-    SELECT m.*, a.name as account_name, a.email as account_email
+    SELECT m.*, a.name as account_name, a.email as account_email, a.avatar_color, a.avatar_name
     FROM mails m
     LEFT JOIN accounts a ON m.account_id = a.id
     WHERE m.id = ?
@@ -290,11 +515,14 @@ export function getMailDetail(mailId: string): MailDetail | null {
   const toList: string[] = JSON.parse(row.to_list || '[]');
   const ccList: string[] = JSON.parse(row.cc_list || '[]');
 
+  const customRules = loadCustomRules();
   return {
     id: row.id,
     accountId: row.account_id,
     accountName: row.account_name || '',
     accountEmail: row.account_email || '',
+    avatarColor: row.avatar_color || '',
+    avatarName: row.avatar_name || '',
     folder: row.folder,
     fromName: row.from_name,
     fromAddress: row.from_address,
@@ -303,6 +531,7 @@ export function getMailDetail(mailId: string): MailDetail | null {
     isRead: true,
     isFlagged: row.is_flagged === 1,
     hasAttachments: attachments.length > 0,
+    verificationCode: detectVerificationCode(row.subject || '', row.body_text || '', row.from_address || '', customRules),
     toList,
     ccList,
     bodyText: row.body_text,
