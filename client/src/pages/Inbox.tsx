@@ -9,6 +9,16 @@ function isVerificationCode(mail: MailSummary): boolean {
   return !!mail.verificationCode;
 }
 
+// 剥离邮件 HTML 中会泄漏到页面的全局标签
+function sanitizeMailHtml(html: string): string {
+  return html
+    .replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s>][\s\S]*?<\/style>/gi, '')
+    .replace(/<link[\s>][\s\S]*?\/?>/gi, '')
+    .replace(/<meta[\s>][\s\S]*?\/?>/gi, '')
+    .replace(/<base[\s>][\s\S]*?\/?>/gi, '');
+}
+
 export default function Inbox() {
   const { confirm, toast } = useUI();
   const navigate = useNavigate();
@@ -574,7 +584,7 @@ export default function Inbox() {
                 {/* 邮件正文 */}
                 <div className="border-t border-gray-100 pt-5">
                   {detail.bodyHtml && !showRaw ? (
-                    <div className="mail-body text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: detail.bodyHtml }} />
+                    <div className="mail-body text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(detail.bodyHtml) }} />
                   ) : (
                     <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
                       {detail.bodyText || '(无内容)'}
