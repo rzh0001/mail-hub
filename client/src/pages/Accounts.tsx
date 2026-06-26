@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { getAccounts, createAccount, deleteAccount, testAccount, syncAccount, getProviders, getAccountConfig, exportAccounts, importAccounts } from '../services/api';
+import { getAccounts, createAccount, deleteAccount, updateAccount, testAccount, syncAccount, getProviders, getAccountConfig, exportAccounts, importAccounts } from '../services/api';
 import { useUI } from '../contexts/UIContext';
-import type { MailAccount, MailProvider, CreateAccountInput, AccountConfig, ImportResult } from '../types';
+import type { MailAccount, MailProvider, CreateAccountInput, UpdateAccountInput, AccountConfig, ImportResult } from '../types';
 
 export default function Accounts() {
   const { confirm, toast } = useUI();
@@ -18,6 +18,24 @@ export default function Accounts() {
   // 配置查看弹窗
   const [configModal, setConfigModal] = useState<{ open: boolean; config: AccountConfig | null }>({ open: false, config: null });
   const [showAuthCode, setShowAuthCode] = useState(false);
+
+  // 编辑弹窗
+  const [editModal, setEditModal] = useState<{ open: boolean; account: MailAccount | null }>({ open: false, account: null });
+  const [editForm, setEditForm] = useState<{ name: string; avatarName: string; avatarColor: string }>({ name: '', avatarName: '', avatarColor: '' });
+  const [editSaving, setEditSaving] = useState(false);
+
+  const AVATAR_COLORS = [
+    '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
+    '#EC4899', '#06B6D4', '#F97316', '#6366F1', '#14B8A6',
+  ];
+
+  const getAvatarDisplay = (account: MailAccount) => {
+    return account.avatarName || account.name.charAt(0).toUpperCase() || account.email.charAt(0).toUpperCase();
+  };
+
+  const getAvatarBg = (account: MailAccount) => {
+    return account.avatarColor || '#3B82F6';
+  };
 
   // 导入导出
   const [exporting, setExporting] = useState(false);
@@ -92,6 +110,37 @@ export default function Accounts() {
       setShowAuthCode(false);
     } catch (err: any) {
       toast('获取配置失败: ' + err.message, 'error');
+    }
+  };
+
+  // 编辑账户
+  const handleEdit = (account: MailAccount) => {
+    setEditForm({
+      name: account.name,
+      avatarName: account.avatarName || '',
+      avatarColor: account.avatarColor || AVATAR_COLORS[0],
+    });
+    setEditModal({ open: true, account });
+  };
+
+  const handleEditSave = async () => {
+    if (!editModal.account) return;
+    if (!editForm.name.trim()) { toast('账户名称不能为空', 'error'); return; }
+    setEditSaving(true);
+    try {
+      const input: UpdateAccountInput = {
+        name: editForm.name.trim(),
+        avatarName: editForm.avatarName.trim(),
+        avatarColor: editForm.avatarColor,
+      };
+      await updateAccount(editModal.account.id, input);
+      setEditModal({ open: false, account: null });
+      loadAccounts();
+      toast('账户已更新', 'success');
+    } catch (err: any) {
+      toast('更新失败: ' + err.message, 'error');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -299,8 +348,9 @@ export default function Accounts() {
             <div key={account.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-3.5 hover:shadow-md transition-shadow">
               {/* 头部：头像 + 名称 + 删除 */}
               <div className="flex items-center gap-2.5 mb-2.5">
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-blue-600 font-semibold text-xs">{account.email.charAt(0).toUpperCase()}</span>
+                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: getAvatarBg(account) }}>
+                  <span className="text-white font-semibold text-xs">{getAvatarDisplay(account)}</span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="font-medium text-gray-800 text-sm truncate">{account.name}</h3>
@@ -324,6 +374,8 @@ export default function Accounts() {
 
               {/* 操作按钮 */}
               <div className="flex items-center gap-1.5">
+                <button onClick={() => handleEdit(account)}
+                  className="px-2 py-1.5 text-xs border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">编辑</button>
                 <button onClick={() => handleViewConfig(account.id)}
                   className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">配置</button>
                 <button onClick={() => handleTest(account.id)} disabled={testing === account.id}
@@ -335,6 +387,89 @@ export default function Accounts() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 编辑弹窗 */}
+      {editModal.open && editModal.account && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setEditModal({ open: false, account: null })}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-800">编辑账户</h2>
+              <button onClick={() => setEditModal({ open: false, account: null })}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* 头像预览 */}
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+                  style={{ backgroundColor: editForm.avatarColor || '#3B82F6' }}>
+                  {editForm.avatarName || editForm.name.charAt(0).toUpperCase() || '?'}
+                </div>
+                <div className="text-sm text-gray-500">
+                  <p className="font-medium text-gray-700">{editForm.name || '账户名称'}</p>
+                  <p className="text-xs text-gray-400">{editModal.account.email}</p>
+                </div>
+              </div>
+
+              {/* 账户名称 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">账户名称</label>
+                <input type="text" value={editForm.name}
+                  onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              </div>
+
+              {/* 头像显示名 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">头像显示名</label>
+                <input type="text" placeholder="留空则显示账户首字" value={editForm.avatarName}
+                  onChange={e => setEditForm(prev => ({ ...prev, avatarName: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              </div>
+
+              {/* 头像颜色 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">头像颜色</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {AVATAR_COLORS.map(color => (
+                    <button key={color}
+                      onClick={() => setEditForm(prev => ({ ...prev, avatarColor: color }))}
+                      className={`w-7 h-7 rounded-full border-2 transition-all ${
+                        editForm.avatarColor === color ? 'border-gray-800 scale-110' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: color }} />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">自定义：</span>
+                  <input type="text" placeholder="#3B82F6" value={editForm.avatarColor}
+                    onChange={e => setEditForm(prev => ({ ...prev, avatarColor: e.target.value }))}
+                    className="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono" />
+                  <input type="color" value={editForm.avatarColor || '#3B82F6'}
+                    onChange={e => setEditForm(prev => ({ ...prev, avatarColor: e.target.value }))}
+                    className="w-8 h-8 rounded cursor-pointer border border-gray-300" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6 pt-4 border-t border-gray-100">
+              <button onClick={handleEditSave} disabled={editSaving}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50">
+                {editSaving ? '保存中...' : '保存'}
+              </button>
+              <button onClick={() => setEditModal({ open: false, account: null })}
+                className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm">
+                取消
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -357,6 +492,16 @@ export default function Accounts() {
               <ConfigRow label="账户名称" value={configModal.config.name} />
               <ConfigRow label="邮箱地址" value={configModal.config.email} />
               <ConfigRow label="邮箱提供商" value={providerNames[configModal.config.provider] || configModal.config.provider || '自定义'} />
+              {configModal.config.avatarName && <ConfigRow label="头像显示名" value={configModal.config.avatarName} />}
+              {configModal.config.avatarColor && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-500">头像颜色</span>
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded-full border" style={{ backgroundColor: configModal.config.avatarColor }} />
+                    <span className="text-sm text-gray-800 font-medium">{configModal.config.avatarColor}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="border-t border-gray-100 pt-3" />
               <h3 className="text-sm font-medium text-gray-700 mb-2">IMAP 配置（收件）</h3>

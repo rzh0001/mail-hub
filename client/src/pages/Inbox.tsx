@@ -1,8 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { getMails, getMail, markRead, markFlagged, deleteMail, batchMarkRead, batchDeleteMails } from '../services/api';
+import { getMails, getMail, markRead, markFlagged, deleteMail, batchMarkRead, batchDeleteMails, markAllRead, syncAccount } from '../services/api';
 import { useUI } from '../contexts/UIContext';
 import type { MailSummary, MailDetail as MailDetailType } from '../types';
+
+// 验证码检测（基于服务端返回的 verificationCode）
+function isVerificationCode(mail: MailSummary): boolean {
+  return !!mail.verificationCode;
+}
 
 export default function Inbox() {
   const { confirm, toast } = useUI();
@@ -10,6 +15,23 @@ export default function Inbox() {
   const [searchParams, setSearchParams] = useSearchParams();
   const accountId = searchParams.get('accountId') || undefined;
   const selectedId = searchParams.get('selected') || undefined;
+
+  // 文件夹选择
+  const folder = searchParams.get('folder') || 'INBOX';
+  const setFolder = (f: string) => {
+    setSearchParams(prev => {
+      prev.set('folder', f);
+      prev.delete('page');
+      return prev;
+    });
+    setPage(1);
+  };
+
+  const FOLDER_TABS = [
+    { key: 'INBOX', label: '收件箱' },
+    { key: '已发送', label: '发件箱' },
+    { key: '已删除', label: '垃圾箱' },
+  ];
 
   // 列表状态
   const [mails, setMails] = useState<MailSummary[]>([]);
@@ -21,12 +43,16 @@ export default function Inbox() {
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // 详情状态
   const [detail, setDetail] = useState<MailDetailType | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const detailRef = useRef<HTMLDivElement>(null);
+
+  // 批量模式（复选框默认隐藏，点击批量后显示）
+  const [batchMode, setBatchMode] = useState(false);
 
   // 移动端：列表/详情切换
   const [showDetailMobile, setShowDetailMobile] = useState(false);
@@ -35,7 +61,7 @@ export default function Inbox() {
   const loadMails = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getMails({ accountId, page, pageSize });
+      const result = await getMails({ accountId, folder, page, pageSize });
       setMails(result.mails);
       setTotal(result.total);
     } catch (err) {
@@ -43,10 +69,10 @@ export default function Inbox() {
     } finally {
       setLoading(false);
     }
-  }, [accountId, page]);
+  }, [accountId, folder, page]);
 
   useEffect(() => { loadMails(); }, [loadMails]);
-  useEffect(() => { setPage(1); }, [accountId]);
+  useEffect(() => { setPage(1); }, [accountId, folder]);
 
   // 加载邮件详情
   useEffect(() => {
@@ -119,6 +145,24 @@ export default function Inbox() {
     if (selectedId) navigate(`/compose/${selectedId}`);
   };
 
+  // 全部已读
+  const handleMarkAllRead = async () => {
+    setLoading(true);
+    try {
+      const result = await markAllRead(accountId);
+      setMails(prev => prev.map(m => ({ ...m, isRead: true })));
+      toast(`已将 ${result.count} 封邮件标记为已读`, 'success');
+    } catch { toast('操作失败', 'error'); }
+    finally { setLoading(false); }
+  };
+
+  // 切换批量模式
+  const toggleBatchMode = () => {
+    const next = !batchMode;
+    setBatchMode(next);
+    if (!next) setSelectedIds(new Set());
+  };
+
   // ----- 批量操作 -----
   const allSelected = mails.length > 0 && mails.every(m => selectedIds.has(m.id));
   const someSelected = selectedIds.size > 0;
@@ -172,6 +216,39 @@ export default function Inbox() {
     finally { setBatchLoading(false); }
   };
 
+  // 同步邮件
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const ids = accountId ? [accountId] : [...new Set(mails.map(m => m.accountId))];
+      let total = 0;
+      for (const id of ids) {
+        const result = await syncAccount(id, folder, 50);
+        total += result.synced;
+      }
+      const folderLabel = FOLDER_TABS.find(f => f.key === folder)?.label || folder;
+      toast(`同步${folderLabel}完成，新增 ${total} 封邮件`, 'success');
+      loadMails();
+    } catch { toast('同步失败', 'error'); }
+    finally { setSyncing(false); }
+  };
+
+  // 自动标记验证码邮件为已读
+  const autoMarkedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const unreadVerificationIds = mails
+      .filter(m => !m.isRead && !autoMarkedRef.current.has(m.id) && isVerificationCode(m))
+      .map(m => m.id);
+    if (unreadVerificationIds.length === 0) return;
+    unreadVerificationIds.forEach(id => autoMarkedRef.current.add(id));
+    batchMarkRead(unreadVerificationIds).then(() => {
+      setMails(prev => prev.map(m =>
+        unreadVerificationIds.includes(m.id) ? { ...m, isRead: true } : m
+      ));
+      toast(`已自动标记 ${unreadVerificationIds.length} 封验证码邮件为已读`, 'info');
+    }).catch(() => {});
+  }, [mails, toast]);
+
   // 切换页面或过滤条件时清空选中
   useEffect(() => { setSelectedIds(new Set()); }, [accountId, page]);
 
@@ -208,24 +285,57 @@ export default function Inbox() {
       <div className={`w-full lg:w-[400px] xl:w-[460px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col ${
         showDetailMobile ? 'hidden lg:flex' : 'flex'
       }`}>
-        {/* 列表头部 */}
-        <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-3">
-          {mails.length > 0 && (
-            <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
-              <input type="checkbox" checked={allSelected}
-                onChange={handleSelectAll}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-              <span className="text-xs select-none">全选</span>
-            </label>
-          )}
-          <p className="text-sm text-gray-500">
+        {/* 文件夹标签 */}
+        <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-1">
+          {FOLDER_TABS.map(tab => (
+            <button key={tab.key} onClick={() => setFolder(tab.key)}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                folder === tab.key
+                  ? 'bg-blue-600 text-white font-medium'
+                  : 'text-gray-500 hover:bg-gray-100'
+              }`}>
+              {tab.label}
+            </button>
+          ))}
+          <span className="ml-auto text-xs text-gray-400">
             {total > 0 ? `共 ${total} 封` : '暂无邮件'}
-          </p>
+          </span>
         </div>
 
-        {/* 批量操作栏 */}
-        {someSelected && (
+        {/* 功能按钮区 */}
+        <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
+          <button onClick={toggleBatchMode}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+              batchMode
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'border-gray-300 text-gray-600 hover:bg-gray-100'
+            }`}>
+            {batchMode ? '取消批量' : '批量'}
+          </button>
+          <button onClick={handleMarkAllRead}
+            className="px-2.5 py-1 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors">
+            全部已读
+          </button>
+          <button onClick={handleSync} disabled={syncing}
+            className="px-2.5 py-1 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <svg className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {syncing ? '同步中' : '同步'}
+          </button>
+        </div>
+
+        {/* 批量操作栏（仅在批量模式下有选中时显示） */}
+        {batchMode && someSelected && (
           <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-3">
+            {batchMode && (
+              <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer mr-1">
+                <input type="checkbox" checked={allSelected}
+                  onChange={handleSelectAll}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                <span className="text-xs select-none">全选</span>
+              </label>
+            )}
             <span className="text-sm text-blue-700 font-medium">已选 {selectedIds.size} 封</span>
             <button onClick={handleBatchRead} disabled={batchLoading}
               className="px-2.5 py-1 text-xs bg-white border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50">
@@ -237,7 +347,7 @@ export default function Inbox() {
             </button>
             <button onClick={() => setSelectedIds(new Set())}
               className="ml-auto text-xs text-gray-400 hover:text-gray-600">
-              取消
+              取消选择
             </button>
           </div>
         )}
@@ -258,33 +368,44 @@ export default function Inbox() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {mails.map(mail => {
+              {mails.map((mail) => {
                 const isChecked = selectedIds.has(mail.id);
                 return (
                   <div key={mail.id}
                     className={`flex items-stretch border-l-2 cursor-pointer hover:bg-gray-50 transition-colors ${
                       selectedId === mail.id ? 'border-l-blue-500 bg-blue-50/40' : 'border-l-transparent'
                     } ${!mail.isRead ? 'bg-blue-50/20' : ''}`}
+                    style={{ paddingLeft: batchMode ? '4px' : '12px' }}
                   >
-                    {/* 复选框 */}
-                    <label className="flex items-center pl-3 pr-1 cursor-pointer"
-                      onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={isChecked}
-                        onChange={() => handleToggleSelect(mail.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                    </label>
+                    {/* 复选框（仅批量模式显示） */}
+                    {batchMode && (
+                      <label className="flex items-center pl-3 pr-1 cursor-pointer"
+                        onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={isChecked}
+                          onChange={() => handleToggleSelect(mail.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      </label>
+                    )}
                     {/* 邮件内容（点击打开详情） */}
                     <button onClick={() => handleSelect(mail.id)}
                       className="flex-1 text-left py-3.5 pr-4 min-w-0">
                       <div className="flex items-start gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0 mt-0.5">
-                          {mail.accountEmail.charAt(0).toUpperCase()}
+                        {/* 邮箱头像 */}
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 mt-0.5 shadow-sm ring-2 ring-white"
+                          style={{ backgroundColor: (mail.avatarColor || '#3B82F6') }}>
+                          {mail.avatarName || mail.accountEmail.charAt(0).toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
+                          <div className="flex items-center gap-1.5 mb-0.5">
                             <span className={`text-sm truncate ${!mail.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
                               {mail.fromName || mail.fromAddress}
                             </span>
+                            {isVerificationCode(mail) && (
+                              <span className="text-xs px-1 py-0.5 rounded bg-orange-100 text-orange-600 font-medium leading-none flex-shrink-0 flex items-center gap-1">
+                                验证码
+                                {mail.verificationCode && <span className="font-mono font-bold">{mail.verificationCode}</span>}
+                              </span>
+                            )}
                             {!mail.isRead && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 flex-shrink-0" />}
                             <span className="text-xs text-gray-400 ml-auto flex-shrink-0">{formatDate(mail.receivedAt)}</span>
                           </div>
@@ -292,7 +413,6 @@ export default function Inbox() {
                             {mail.subject || '(无主题)'}
                           </p>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400 truncate">{mail.accountEmail}</span>
                             {mail.hasAttachments && (
                               <svg className="w-3 h-3 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
