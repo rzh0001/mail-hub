@@ -574,7 +574,43 @@ export default function Inbox() {
                 {/* 邮件正文 */}
                 <div className="border-t border-gray-100 pt-5">
                   {detail.bodyHtml && !showRaw ? (
-                    <div className="mail-body text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: detail.bodyHtml }} />
+                    <iframe
+                      className="w-full border-0"
+                      title="邮件正文"
+                      sandbox="allow-same-origin"
+                      ref={el => {
+                        if (!el || el.contentDocument?.body) return;
+                        const doc = el.contentDocument!;
+                        doc.open();
+                        doc.write(`
+                          <!DOCTYPE html>
+                          <html>
+                          <head>
+                            <meta charset="utf-8">
+                            <base target="_blank">
+                            <style>
+                              body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.7; color: #374151; word-break: break-word; }
+                              img { max-width: 100%; height: auto; }
+                              a { color: #2563eb; }
+                              blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid #d1d5db; color: #6b7280; }
+                              table { max-width: 100%; border-collapse: collapse; }
+                              td, th { padding: 4px 8px; border: 1px solid #d1d5db; }
+                            </style>
+                          </head>
+                          <body>${detail.bodyHtml}</body>
+                          </html>
+                        `);
+                        doc.close();
+                        // 自动调整 iframe 高度
+                        const resize = () => {
+                          el.style.height = '0px';
+                          el.style.height = el.contentWindow!.document.documentElement.scrollHeight + 'px';
+                        };
+                        el.addEventListener('load', resize);
+                        // 等待图片加载后重算高度
+                        setTimeout(resize, 500);
+                      }}
+                    />
                   ) : (
                     <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
                       {detail.bodyText || '(无内容)'}
