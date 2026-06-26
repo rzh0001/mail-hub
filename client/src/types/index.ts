@@ -15,6 +15,8 @@ export interface MailProvider {
   smtpHost: string;
   smtpPort: number;
   smtpSecure: boolean;
+  sentFolder: string;
+  trashFolder: string;
 }
 
 // 邮箱账户
@@ -29,6 +31,8 @@ export interface MailAccount {
   smtpPort: number;
   smtpSecure: boolean;
   provider: string;
+  avatarColor: string;
+  avatarName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +43,8 @@ export interface MailSummary {
   accountId: string;
   accountName: string;
   accountEmail: string;
+  avatarColor: string;
+  avatarName: string;
   folder: string;
   fromName: string;
   fromAddress: string;
@@ -47,6 +53,7 @@ export interface MailSummary {
   isRead: boolean;
   isFlagged: boolean;
   hasAttachments: boolean;
+  verificationCode: string;
 }
 
 // 附件
@@ -83,6 +90,8 @@ export interface CreateAccountInput {
   smtpHost?: string;
   smtpPort?: number;
   smtpSecure?: boolean;
+  avatarColor?: string;
+  avatarName?: string;
 }
 
 // 账户完整配置（含授权码）
@@ -97,6 +106,40 @@ export interface AccountConfig {
   smtpHost: string;
   smtpPort: number;
   smtpSecure: boolean;
+  avatarColor: string;
+  avatarName: string;
+}
+
+// 更新账户输入
+export interface UpdateAccountInput {
+  name?: string;
+  avatarColor?: string;
+  avatarName?: string;
+  imapHost?: string;
+  imapPort?: number;
+  imapSecure?: boolean;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+}
+
+// 系统设置
+export type SettingsMap = Record<string, string>;
+
+// 验证码识别规则
+export interface VerificationRule {
+  id: number;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
+  enabled: number;
+  created_at: string;
+}
+
+// 内置验证码规则（不可编辑，可关闭）
+export interface BuiltinVerificationRule {
+  id: string;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
 }
 
 // 导入结果
@@ -115,4 +158,23 @@ export interface SendMailInput {
   subject: string;
   body: string;
   isHtml?: boolean;
+}
+
+// 转发规则
+export interface ForwardingRule {
+  id: number;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
+  target_email: string;
+  enabled: number;
+  created_at: string;
+}
+
+// 垃圾箱规则
+export interface TrashRule {
+  id: number;
+  type: 'subject_keyword' | 'sender_pattern';
+  value: string;
+  enabled: number;
+  created_at: string;
 }

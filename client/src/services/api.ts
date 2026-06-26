@@ -1,4 +1,4 @@
-import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, SendMailInput, AccountConfig, ImportResult } from '../types';
+import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, UpdateAccountInput, SendMailInput, AccountConfig, ImportResult, SettingsMap, VerificationRule, BuiltinVerificationRule, ForwardingRule, TrashRule } from '../types';
 
 const BASE = '/api';
 
@@ -28,6 +28,14 @@ export function getAccounts(): Promise<MailAccount[]> {
 export function createAccount(input: CreateAccountInput): Promise<MailAccount> {
   return request('/accounts', {
     method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+// 更新账户基本信息
+export function updateAccount(id: string, input: UpdateAccountInput): Promise<MailAccount> {
+  return request(`/accounts/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(input),
   });
 }
@@ -105,6 +113,12 @@ export function importAccounts(accounts: CreateAccountInput[]): Promise<ImportRe
   });
 }
 
+// 全部标记已读
+export function markAllRead(accountId?: string): Promise<{ count: number }> {
+  const q = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+  return request(`/mails/read-all${q}`, { method: 'PUT' });
+}
+
 // 批量标记已读
 export function batchMarkRead(ids: string[]): Promise<{ count: number }> {
   return request('/mails/batch/read', {
@@ -126,5 +140,122 @@ export function sendMail(input: SendMailInput): Promise<void> {
   return request('/mails/send', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+// 获取系统设置
+export function getSettings(): Promise<SettingsMap> {
+  return request('/settings');
+}
+
+// 更新系统设置
+export function updateSettings(settings: SettingsMap): Promise<SettingsMap> {
+  return request('/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+}
+
+// 获取验证码识别规则
+export function getVerificationRules(): Promise<VerificationRule[]> {
+  return request('/verification-rules');
+}
+
+// 添加验证码识别规则
+export function addVerificationRule(type: 'subject_keyword' | 'sender_pattern', value: string): Promise<VerificationRule> {
+  return request('/verification-rules', {
+    method: 'POST',
+    body: JSON.stringify({ type, value }),
+  });
+}
+
+// 删除验证码识别规则
+export function deleteVerificationRule(id: number): Promise<void> {
+  return request(`/verification-rules/${id}`, { method: 'DELETE' });
+}
+
+// 切换验证码识别规则启用状态
+export function toggleVerificationRule(id: number): Promise<VerificationRule> {
+  return request(`/verification-rules/${id}/toggle`, { method: 'PUT' });
+}
+
+// 获取内置规则 + 已关闭列表
+export function getBuiltinVerificationRules(): Promise<{ rules: BuiltinVerificationRule[]; disabled: string[] }> {
+  return request('/verification-rules/builtin');
+}
+
+// 更新已关闭的内置规则列表
+export function updateDisabledBuiltinRules(disabled: string[]): Promise<{ disabled: string[] }> {
+  return request('/verification-rules/disabled-builtin', {
+    method: 'PUT',
+    body: JSON.stringify({ disabled }),
+  });
+}
+
+// ====== 转发规则 ======
+
+// 获取所有转发规则
+export function getForwardingRules(): Promise<ForwardingRule[]> {
+  return request('/forwarding-rules');
+}
+
+// 添加转发规则
+export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, targetEmail: string): Promise<ForwardingRule> {
+  return request('/forwarding-rules', {
+    method: 'POST',
+    body: JSON.stringify({ type, value, targetEmail }),
+  });
+}
+
+// 删除转发规则
+export function deleteForwardingRule(id: number): Promise<void> {
+  return request(`/forwarding-rules/${id}`, { method: 'DELETE' });
+}
+
+// 切换转发规则启用状态
+export function toggleForwardingRule(id: number): Promise<ForwardingRule> {
+  return request(`/forwarding-rules/${id}/toggle`, { method: 'PUT' });
+}
+
+// ====== 垃圾箱规则 ======
+
+// 获取所有垃圾箱规则
+export function getTrashRules(): Promise<TrashRule[]> {
+  return request('/trash-rules');
+}
+
+// 添加垃圾箱规则
+export function addTrashRule(type: 'subject_keyword' | 'sender_pattern', value: string): Promise<TrashRule> {
+  return request('/trash-rules', {
+    method: 'POST',
+    body: JSON.stringify({ type, value }),
+  });
+}
+
+// 删除垃圾箱规则
+export function deleteTrashRule(id: number): Promise<void> {
+  return request(`/trash-rules/${id}`, { method: 'DELETE' });
+}
+
+// 切换垃圾箱规则启用状态
+export function toggleTrashRule(id: number): Promise<TrashRule> {
+  return request(`/trash-rules/${id}/toggle`, { method: 'PUT' });
+}
+
+// ====== 认证 ======
+
+// 验证密码
+export function verifyPassword(password: string): Promise<{ verified: boolean }> {
+  return request('/auth/verify', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+}
+
+// 修改密码
+export function changePassword(oldPassword: string, newPassword: string): Promise<{ changed: boolean }> {
+  return request('/auth/password', {
+    method: 'PUT',
+    body: JSON.stringify({ oldPassword, newPassword }),
   });
 }
