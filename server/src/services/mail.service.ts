@@ -494,7 +494,34 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
 }
 
 // 获取邮件详情
-export function getMailDetail(mailId: string): MailDetail | null {
+// 按 UID 从 IMAP 拉取单封邮件的正文并更新数据库
+async function fetchMailBody(account: AccountRow, folder: string, uid: number, mailId: string): Promise<{ bodyText: string; bodyHtml: string } | null> {
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: account.imap_port,
+    secure: account.imap_secure === 1,
+    auth: { user: account.email, pass: account.auth_code },
+    logger: false,
+  });
+  try {
+    await client.connect();
+    await client.mailboxOpen(folder);
+    for await (const msg of client.fetch({ uid }, { source: true })) {
+      const parsed = await simpleParser(msg.source!);
+      const bodyText = parsed.text || '';
+      const bodyHtml = parsed.html || '';
+      const db = getDatabase();
+      db.prepare('UPDATE mails SET body_text = ?, body_html = ? WHERE id = ?').run(bodyText, bodyHtml, mailId);
+      return { bodyText, bodyHtml };
+    }
+    await client.logout();
+  } catch {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+  return null;
+}
+
+export async function getMailDetail(mailId: string): Promise<MailDetail | null> {
   const db = getDatabase();
 
   const row = db.prepare(`
@@ -509,6 +536,18 @@ export function getMailDetail(mailId: string): MailDetail | null {
   // 自动标记为已读
   if (!row.is_read) {
     db.prepare('UPDATE mails SET is_read = 1 WHERE id = ?').run(mailId);
+  }
+
+  // 正文为空时从 IMAP 按需拉取
+  let bodyText = row.body_text || '';
+  let bodyHtml = row.body_html || '';
+  if (!bodyText && !bodyHtml) {
+    const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(row.account_id) as AccountRow | undefined;
+    if (account) {
+      await fetchMailBody(account, row.folder, row.message_uid, mailId).then(r => {
+        if (r) { bodyText = r.bodyText; bodyHtml = r.bodyHtml; }
+      }).catch(err => console.error(`[MailDetail] 从 IMAP 拉取正文失败 (${mailId}):`, err));
+    }
   }
 
   const attachments: Attachment[] = JSON.parse(row.attachments || '[]');
@@ -531,11 +570,11 @@ export function getMailDetail(mailId: string): MailDetail | null {
     isRead: true,
     isFlagged: row.is_flagged === 1,
     hasAttachments: attachments.length > 0,
-    verificationCode: detectVerificationCode(row.subject || '', row.body_text || '', row.from_address || '', customRules),
+    verificationCode: detectVerificationCode(row.subject || '', bodyText, row.from_address || '', customRules),
     toList,
     ccList,
-    bodyText: row.body_text,
-    bodyHtml: row.body_html,
+    bodyText,
+    bodyHtml,
     attachments,
   };
 }

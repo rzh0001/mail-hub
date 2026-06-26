@@ -62,9 +62,9 @@ router.post('/mails/batch/delete', (req: Request, res: Response) => {
 });
 
 // 获取邮件详情
-router.get('/mails/:id', (req: Request, res: Response) => {
+router.get('/mails/:id', async (req: Request, res: Response) => {
   try {
-    const mail = mailService.getMailDetail(String(req.params.id));
+    const mail = await mailService.getMailDetail(String(req.params.id));
     if (mail) {
       res.json({ success: true, data: mail });
     } else {
