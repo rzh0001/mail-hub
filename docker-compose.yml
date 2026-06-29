@@ -1,0 +1,16 @@
+services:
+  mail-hub:
+    build: .
+    image: mail-hub:latest
+    container_name: mail-hub
+    ports:
+      - "3001:3001"
+    volumes:
+      - mail-hub-data:/app/server/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    restart: unless-stopped
+
+volumes:
+  mail-hub-data:
