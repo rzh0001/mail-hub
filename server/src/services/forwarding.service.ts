@@ -1,5 +1,6 @@
 import { getDatabase } from '../database';
 import type { ForwardingRuleRow } from '../types';
+import { getMethod, getDefaultMethod } from './forwarding-method.service';
 
 // ---------- CRUD ----------
 
@@ -13,12 +14,20 @@ export function getEnabledForwardingRules(): ForwardingRuleRow[] {
   return db.prepare('SELECT * FROM forwarding_rules WHERE enabled = 1 ORDER BY id').all() as ForwardingRuleRow[];
 }
 
-export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, targetEmail: string): ForwardingRuleRow {
+export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, methodId?: number): ForwardingRuleRow {
   const db = getDatabase();
   const now = new Date().toISOString();
-  const result = db.prepare('INSERT INTO forwarding_rules (type, value, target_email, enabled, created_at) VALUES (?, ?, ?, 1, ?)')
-    .run(type, value.trim(), targetEmail.trim(), now);
+  const result = db.prepare('INSERT INTO forwarding_rules (type, value, target_email, method_id, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)')
+    .run(type, value.trim(), '', methodId || null, now);
   return db.prepare('SELECT * FROM forwarding_rules WHERE id = ?').get(result.lastInsertRowid) as ForwardingRuleRow;
+}
+
+export function updateForwardingRuleMethod(id: number, methodId: number | null): ForwardingRuleRow | null {
+  const db = getDatabase();
+  const rule = db.prepare('SELECT * FROM forwarding_rules WHERE id = ?').get(id) as ForwardingRuleRow | undefined;
+  if (!rule) return null;
+  db.prepare('UPDATE forwarding_rules SET method_id = ? WHERE id = ?').run(methodId, id);
+  return db.prepare('SELECT * FROM forwarding_rules WHERE id = ?').get(id) as ForwardingRuleRow;
 }
 
 export function deleteForwardingRule(id: number): boolean {
@@ -37,18 +46,39 @@ export function toggleForwardingRule(id: number): ForwardingRuleRow | null {
 
 // ---------- 转发逻辑 ----------
 
-// 检测是否匹配转发规则，返回要转发到的邮箱列表
-export function getForwardTargets(subject: string, fromAddress: string): string[] {
+interface MatchedForwardTarget {
+  ruleId: number;
+  methodId: number | null;
+  methodType: string;
+  methodTarget: string;
+}
+
+// 检测匹配的转发规则及其对应的方法
+export function getMatchedForwardTargets(subject: string, fromAddress: string): MatchedForwardTarget[] {
   const rules = getEnabledForwardingRules();
-  const matched: string[] = [];
+  const results: MatchedForwardTarget[] = [];
+
   for (const r of rules) {
     try {
       const re = new RegExp(r.value, 'i');
       const matches = r.type === 'subject_keyword' ? re.test(subject) : re.test(fromAddress);
-      if (matches && !matched.includes(r.target_email)) {
-        matched.push(r.target_email);
+      if (!matches) continue;
+
+      // 确定使用哪个转发方法
+      let methodId = r.method_id;
+      let method = methodId ? getMethod(methodId) : null;
+      if (!method) {
+        method = getDefaultMethod();
       }
+      if (!method) continue;
+
+      results.push({
+        ruleId: r.id,
+        methodId: method.id,
+        methodType: method.type,
+        methodTarget: method.target,
+      });
     } catch { /* ignore */ }
   }
-  return matched;
+  return results;
 }

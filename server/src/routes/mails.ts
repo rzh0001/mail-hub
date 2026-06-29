@@ -12,8 +12,9 @@ router.get('/mails', (req: Request, res: Response) => {
     const folder = req.query.folder as string | undefined;
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.pageSize as string) || 20;
+    const query = req.query.q as string | undefined;
 
-    const result = mailService.getMailList(accountId, folder, page, pageSize);
+    const result = mailService.getMailList(accountId, folder, page, pageSize, query);
     res.json({ success: true, data: result });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || '获取邮件列表失败' });
@@ -104,6 +105,21 @@ router.put('/mails/:id/flag', (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || '操作失败' });
+  }
+});
+
+// 搜索邮件
+router.get('/mails/search', (req: Request, res: Response) => {
+  try {
+    const q = (req.query.q as string || '').trim();
+    if (!q) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+    const results = mailService.searchMails(q);
+    res.json({ success: true, data: results });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || '搜索邮件失败' });
   }
 });
 

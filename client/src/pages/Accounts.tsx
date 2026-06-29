@@ -24,6 +24,10 @@ export default function Accounts() {
   const [editForm, setEditForm] = useState<{ name: string; avatarName: string; avatarColor: string }>({ name: '', avatarName: '', avatarColor: '' });
   const [editSaving, setEditSaving] = useState(false);
 
+  // 筛选
+  const [filterProvider, setFilterProvider] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
+
   const AVATAR_COLORS = [
     '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
     '#EC4899', '#06B6D4', '#F97316', '#6366F1', '#14B8A6',
@@ -197,7 +201,17 @@ export default function Accounts() {
 
   const providerNames: Record<string, string> = {
     '163': '163邮箱', 'qq': 'QQ邮箱', 'gmail': 'Gmail', 'outlook': 'Outlook',
+
   };
+
+  const filteredAccounts = accounts.filter(a => {
+    if (filterProvider && a.provider !== filterProvider) return false;
+    if (filterQuery.trim()) {
+      const q = filterQuery.toLowerCase();
+      if (!a.name.toLowerCase().includes(q) && !a.email.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -254,12 +268,34 @@ export default function Accounts() {
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">{error}</div>
           )}
 
-          {/* 163邮箱配置指引 */}
+          {/* 邮箱配置指引 */}
           <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-            <p className="font-medium mb-1">📧 163邮箱配置指引：</p>
-            <p>1. 登录 163 邮箱，进入「设置」→「POP3/SMTP/IMAP」</p>
-            <p>2. 开启「IMAP/SMTP服务」，获取授权码</p>
-            <p>3. 请使用<strong>授权码</strong>而非邮箱密码进行登录</p>
+            <p className="font-medium mb-1">📧 {form.provider === 'qq' ? 'QQ' : form.provider === '163' ? '163' : form.provider === 'gmail' ? 'Gmail' : 'Outlook'}邮箱配置指引：</p>
+            {form.provider === '163' && (
+              <>
+                <p>1. 登录 163 邮箱，进入「设置」→「POP3/SMTP/IMAP」</p>
+                <p>2. 开启「IMAP/SMTP服务」，获取授权码</p>
+              </>
+            )}
+            {form.provider === 'qq' && (
+              <>
+                <p>1. 登录 QQ 邮箱，进入「设置」→「账户」→「POP3/IMAP/SMTP服务」</p>
+                <p>2. 开启「IMAP/SMTP服务」，获取授权码</p>
+              </>
+            )}
+            {form.provider === 'gmail' && (
+              <>
+                <p>1. 登录 Gmail，进入「设置」→「转发和POP/IMAP」</p>
+                <p>2. 启用「IMAP 访问」，创建应用专用密码</p>
+              </>
+            )}
+            {form.provider === 'outlook' && (
+              <>
+                <p>1. 登录 Outlook，进入「设置」→「邮件」→「同步电子邮件」</p>
+                <p>2. 启用 IMAP 连接</p>
+              </>
+            )}
+            <p className="mt-1">3. 请使用<strong>授权码</strong>（或应用密码）而非邮箱密码进行登录</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -281,7 +317,7 @@ export default function Accounts() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">邮箱地址</label>
-              <input type="email" placeholder="example@163.com" value={form.email}
+              <input type="email" placeholder={`example@${form.provider === 'qq' ? 'qq.com' : form.provider === '163' ? '163.com' : form.provider === 'gmail' ? 'gmail.com' : 'outlook.com'}`} value={form.email}
                 onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
             </div>
@@ -332,6 +368,25 @@ export default function Accounts() {
         </div>
       )}
 
+      {/* 筛选控件 */}
+      <div className="flex items-center gap-3 mb-4">
+        <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-8 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_10px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
+          <option value="">全部类型</option>
+          <option value="163">163邮箱</option>
+          <option value="qq">QQ邮箱</option>
+          <option value="gmail">Gmail</option>
+          <option value="outlook">Outlook</option>
+        </select>
+        <input type="text" value={filterQuery}
+          onChange={e => setFilterQuery(e.target.value)}
+          placeholder="搜索名称或邮箱地址..."
+          className="flex-1 max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+        {filteredAccounts.length < accounts.length && (
+          <span className="text-xs text-gray-400">找到 {filteredAccounts.length} 个</span>
+        )}
+      </div>
+
       {/* 账户列表 */}
       {accounts.length === 0 && !showForm ? (
         <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
@@ -342,9 +397,13 @@ export default function Accounts() {
           <p className="text-gray-500 mb-2">还没有添加邮箱账户</p>
           <p className="text-gray-400 text-sm">点击右上角「添加邮箱」开始使用</p>
         </div>
+      ) : filteredAccounts.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+          <p className="text-gray-400 text-sm">无匹配账户，请调整筛选条件</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {accounts.map(account => (
+          {filteredAccounts.map(account => (
             <div key={account.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-3.5 hover:shadow-md transition-shadow">
               {/* 头部：头像 + 名称 + 删除 */}
               <div className="flex items-center gap-2.5 mb-2.5">

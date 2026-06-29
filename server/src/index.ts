@@ -7,6 +7,7 @@ import mailRoutes from './routes/mails';
 import settingsRoutes from './routes/settings';
 import verificationRoutes from './routes/verification';
 import forwardingRoutes from './routes/forwarding';
+import forwardingMethodsRoutes from './routes/forwarding-methods';
 import trashRoutes from './routes/trash';
 import authRoutes from './routes/auth';
 import { startSyncScheduler, stopSyncScheduler } from './services/scheduler.service';
@@ -28,6 +29,7 @@ app.use('/api', mailRoutes);
 app.use('/api', settingsRoutes);
 app.use('/api', verificationRoutes);
 app.use('/api', forwardingRoutes);
+app.use('/api', forwardingMethodsRoutes);
 app.use('/api', trashRoutes);
 app.use('/api', authRoutes);
 

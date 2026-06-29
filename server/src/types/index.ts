@@ -182,7 +182,19 @@ export interface ForwardingRuleRow {
   type: 'subject_keyword' | 'sender_pattern';
   value: string;
   target_email: string;
+  method_id: number | null;
   enabled: number;
+  created_at: string;
+}
+
+// 转发方式（数据库行）
+export interface ForwardingMethodRow {
+  id: number;
+  type: 'email' | 'serverchan' | 'wecom_bot' | 'feishu_bot';
+  name: string;
+  target: string;
+  enabled: number;
+  is_default: number;
   created_at: string;
 }
 

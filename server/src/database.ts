@@ -100,11 +100,22 @@ function initTables(): void {
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS forwarding_methods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('email', 'serverchan', 'wecom_bot', 'feishu_bot')),
+      name TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // 迁移：为已有数据库添加新字段
   try { database.exec("ALTER TABLE accounts ADD COLUMN avatar_color TEXT NOT NULL DEFAULT ''"); } catch {}
   try { database.exec("ALTER TABLE accounts ADD COLUMN avatar_name TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { database.exec("ALTER TABLE forwarding_rules ADD COLUMN method_id INTEGER DEFAULT NULL REFERENCES forwarding_methods(id)"); } catch {}
 
   // 初始化默认设置
   const insertSetting = database.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -112,7 +123,7 @@ function initTables(): void {
   insertSetting.run('sync_max_count', '50');
   insertSetting.run('auto_mark_verification', 'true');
   insertSetting.run('verification_forward_enabled', 'false');
-  insertSetting.run('verification_forward_targets', '[]');
+  insertSetting.run('verification_code_max_length', '8');
 }
 
 export function closeDatabase(): void {

@@ -12,16 +12,16 @@ router.get('/forwarding-rules', (_req: Request, res: Response) => {
 // 添加转发规则
 router.post('/forwarding-rules', (req: Request, res: Response) => {
   try {
-    const { type, value, targetEmail } = req.body;
-    if (!type || !value || !targetEmail) {
-      res.status(400).json({ success: false, error: '请提供 type、value 和 targetEmail' });
+    const { type, value, methodId } = req.body;
+    if (!type || !value) {
+      res.status(400).json({ success: false, error: '请提供 type 和 value' });
       return;
     }
     if (!['subject_keyword', 'sender_pattern'].includes(type)) {
       res.status(400).json({ success: false, error: 'type 必须是 subject_keyword 或 sender_pattern' });
       return;
     }
-    const rule = forwardingService.addForwardingRule(type, value.trim(), targetEmail);
+    const rule = forwardingService.addForwardingRule(type, value.trim(), methodId ? parseInt(methodId) : undefined);
     res.json({ success: true, data: rule });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || '添加转发规则失败' });
@@ -55,6 +55,20 @@ router.put('/forwarding-rules/:id/toggle', (req: Request, res: Response) => {
     res.json({ success: true, data: rule });
   } else {
     res.status(404).json({ success: false, error: '规则不存在' });
+  }
+});
+
+// 更新转发规则的方法
+router.put('/forwarding-rules/:id/method', (req: Request, res: Response) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (isNaN(id)) { res.status(400).json({ success: false, error: '无效的 ID' }); return; }
+    const { methodId } = req.body;
+    const rule = forwardingService.updateForwardingRuleMethod(id, methodId ? parseInt(methodId) : null);
+    if (!rule) { res.status(404).json({ success: false, error: '规则不存在' }); return; }
+    res.json({ success: true, data: rule });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || '更新失败' });
   }
 });
 

@@ -166,7 +166,19 @@ export interface ForwardingRule {
   type: 'subject_keyword' | 'sender_pattern';
   value: string;
   target_email: string;
+  method_id: number | null;
   enabled: number;
+  created_at: string;
+}
+
+// 转发方式
+export interface ForwardingMethod {
+  id: number;
+  type: 'email' | 'serverchan' | 'wecom_bot' | 'feishu_bot';
+  name: string;
+  target: string;
+  enabled: number;
+  is_default: number;
   created_at: string;
 }
 

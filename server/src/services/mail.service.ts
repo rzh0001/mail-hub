@@ -5,11 +5,12 @@ import { v4 as uuid } from 'uuid';
 import { getDatabase } from '../database';
 import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, SendMailInput } from '../types';
 import { matchesTrashRule } from './trash.service';
+import { getSetting } from './settings.service';
 
 // ---------- 验证码检测（内置规则 + 数据库自定义规则）----------
 // 内置规则源码（用于显示 & 编译为正则）
 const BUILTIN_KEYWORDS_SRC = [
-  '验证码', '验证', '认证码', '安全验证', '登录验证', '注册验证',
+  '验证码', '认证码', '安全验证', '登录验证', '注册验证',
   '动态密码', '一次性密码', '安全码', '校验码',
   'verification\\s*code', 'otp', 'one\\.?time', 'auth\\s*code',
   '2fa', 'two\\.?factor', 'confirm.*code', 'security\\s*code',
@@ -24,13 +25,18 @@ const BUILTIN_KEYWORDS = BUILTIN_KEYWORDS_SRC.map(s => new RegExp(s, 'i'));
 const BUILTIN_SENDERS = BUILTIN_SENDERS_SRC.map(s => new RegExp(s, 'i'));
 
 const BUILTIN_EXTRACT = [
-  /验证码[：:]\s*(\d{4,8})/,
-  /验证码.*?[是:：]?\s*(\d{4,8})/,
-  /(?:apple|apply)\s*id\s*(?:code|验证码)[：:\s]*(\d{4,8})/i,
-  /(?:code|otp|pin|passcode)[：:\s]*(\d{4,8})/i,
-  /(\d{4,8})\s*(?:is|为|是)\s*(?:your\s+)?(?:verification|code|otp|apple)/i,
-  /(?:code|otp)\s+is\s+(\d{4,8})/i,
-  /(\d{4,8})/,
+  // 字母+数字混合验证码（放在纯数字前优先匹配，结尾断言防止截取长串）
+  /验证码[：:\s]*([A-Z0-9]{4,8})(?![A-Z0-9])/i,
+  /(?:code|otp|pin|passcode)[：:\s]*([A-Z0-9]{4,8})(?![A-Z0-9])/i,
+  // 以下纯数字规则也加字母数字边界，避免从长串中截取前几位
+  /验证码[：:]\s*(\d{4,8})(?![A-Z0-9])/,
+  /验证码.*?[是:：]?\s*(\d{4,8})(?![A-Z0-9])/,
+  /(?:apple|apply)\s*id\s*(?:code|验证码)[：:\s]*(\d{4,8})(?![A-Z0-9])/i,
+  /(?:code|otp|pin|passcode)[：:\s]*(\d{4,8})(?![A-Z0-9])/i,
+  /(\d{4,8})\s*(?:is|为|是)\s*(?:your\s+)?(?:verification|code|otp|apple)(?![A-Z0-9])/i,
+  /(?:code|otp)\s+is\s+(\d{4,8})(?![A-Z0-9])/i,
+  // 纯数字保底（前后都不能是字母或数字）
+  /(?<![A-Z0-9])(\d{4,8})(?![A-Z0-9])/i,
 ];
 
 // 导出的内置规则列表（用于设置页面展示）
@@ -91,10 +97,19 @@ export function detectVerificationCode(subject: string, bodyText: string, fromAd
   const isVC = allKeywords.some(p => p.test(subject)) || allSenders.some(p => p.test(fromAddress));
   if (!isVC) return '';
 
+  const maxLen = parseInt(getSetting('verification_code_max_length') || '8', 10);
   const textToSearch = `${bodyText}\n${subject}`;
   for (const p of BUILTIN_EXTRACT) {
-    const m = textToSearch.match(p);
-    if (m) return m[1];
+    // 用全局模式循环匹配，一处匹配被拒绝后继续找下一处
+    const re = new RegExp(p.source, p.flags + 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(textToSearch)) !== null) {
+      if (m[1].length > maxLen) continue;
+      // 验证码后面必须是换行/结尾（即单独一行，不含其他字符）
+      const after = textToSearch[m.index + m[0].length];
+      if (after !== undefined && after !== '\n' && after !== '\r') continue;
+      return m[1];
+    }
   }
   return '';
 }
@@ -439,7 +454,7 @@ export function markDeleted(mailId: string): void {
 }
 
 // 获取邮件列表
-export function getMailList(accountId?: string, folder?: string, page: number = 1, pageSize: number = 20): { mails: MailSummary[], total: number } {
+export function getMailList(accountId?: string, folder?: string, page: number = 1, pageSize: number = 20, query?: string): { mails: MailSummary[], total: number } {
   const db = getDatabase();
 
   let where = folder === '已删除' ? 'WHERE 1=1' : 'WHERE m.is_deleted = 0';
@@ -452,6 +467,11 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
   if (folder) {
     where += ' AND m.folder = ?';
     params.push(folder);
+  }
+  if (query && query.trim()) {
+    const like = `%${query.trim()}%`;
+    where += ' AND (m.subject LIKE ? OR m.from_address LIKE ? OR m.from_name LIKE ?)';
+    params.push(like, like, like);
   }
 
   // 取总数
@@ -597,4 +617,25 @@ export async function testImapConnection(host: string, port: number, secure: boo
     try { await client.logout(); } catch { /* ignore */ }
     return false;
   }
+}
+
+// 搜索邮件（用于验证码规则测试选邮件）
+export function searchMails(query: string, limit: number = 20): { id: string; subject: string; fromName: string; fromAddress: string; receivedAt: string }[] {
+  const db = getDatabase();
+  const like = `%${query}%`;
+  const rows = db.prepare(`
+    SELECT m.id, m.subject, m.from_name, m.from_address, m.received_at
+    FROM mails m
+    WHERE m.is_deleted = 0 AND (m.subject LIKE ? OR m.from_address LIKE ?)
+    ORDER BY m.received_at DESC
+    LIMIT ?
+  `).all(like, like, limit) as any[];
+
+  return rows.map(r => ({
+    id: r.id,
+    subject: r.subject || '',
+    fromName: r.from_name || '',
+    fromAddress: r.from_address || '',
+    receivedAt: r.received_at || r.created_at,
+  }));
 }

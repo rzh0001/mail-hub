@@ -49,6 +49,8 @@ export default function Inbox() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const pageSize = 20;
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -71,7 +73,7 @@ export default function Inbox() {
   const loadMails = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getMails({ accountId, folder, page, pageSize });
+      const result = await getMails({ accountId, folder, page, pageSize, q: searchQuery.trim() || undefined });
       setMails(result.mails);
       setTotal(result.total);
     } catch (err) {
@@ -79,9 +81,17 @@ export default function Inbox() {
     } finally {
       setLoading(false);
     }
-  }, [accountId, folder, page]);
+  }, [accountId, folder, page, searchQuery]);
 
   useEffect(() => { loadMails(); }, [loadMails]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setPage(1), 300);
+  };
+
   useEffect(() => { setPage(1); }, [accountId, folder]);
 
   // 加载邮件详情
@@ -310,6 +320,14 @@ export default function Inbox() {
           <span className="ml-auto text-xs text-gray-400">
             {total > 0 ? `共 ${total} 封` : '暂无邮件'}
           </span>
+        </div>
+
+        {/* 搜索框 */}
+        <div className="px-3 py-2 border-b border-gray-100">
+          <input type="text" value={searchQuery}
+            onChange={handleSearchChange}
+            placeholder="搜索主题或发件人..."
+            className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors" />
         </div>
 
         {/* 功能按钮区 */}

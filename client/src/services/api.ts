@@ -1,4 +1,4 @@
-import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, UpdateAccountInput, SendMailInput, AccountConfig, ImportResult, SettingsMap, VerificationRule, BuiltinVerificationRule, ForwardingRule, TrashRule } from '../types';
+import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, UpdateAccountInput, SendMailInput, AccountConfig, ImportResult, SettingsMap, VerificationRule, BuiltinVerificationRule, ForwardingRule, ForwardingMethod, TrashRule } from '../types';
 
 const BASE = '/api';
 
@@ -59,12 +59,13 @@ export function syncAccount(id: string, folder?: string, maxCount?: number): Pro
 }
 
 // 获取邮件列表
-export function getMails(params?: { accountId?: string; folder?: string; page?: number; pageSize?: number }): Promise<MailListResponse> {
+export function getMails(params?: { accountId?: string; folder?: string; page?: number; pageSize?: number; q?: string }): Promise<MailListResponse> {
   const q = new URLSearchParams();
   if (params?.accountId) q.set('accountId', params.accountId);
   if (params?.folder) q.set('folder', params.folder);
   if (params?.page) q.set('page', String(params.page));
   if (params?.pageSize) q.set('pageSize', String(params.pageSize));
+  if (params?.q) q.set('q', params.q);
   const qs = q.toString();
   return request(`/mails${qs ? `?${qs}` : ''}`);
 }
@@ -93,6 +94,11 @@ export function markFlagged(id: string, isFlagged: boolean): Promise<void> {
 // 删除邮件
 export function deleteMail(id: string): Promise<void> {
   return request(`/mails/${id}`, { method: 'DELETE' });
+}
+
+// 搜索邮件
+export function searchMails(q: string): Promise<Array<{ id: string; subject: string; fromName: string; fromAddress: string; receivedAt: string }>> {
+  return request(`/mails/search?q=${encodeURIComponent(q)}`);
 }
 
 // 获取账户完整配置
@@ -179,6 +185,15 @@ export function toggleVerificationRule(id: number): Promise<VerificationRule> {
   return request(`/verification-rules/${id}/toggle`, { method: 'PUT' });
 }
 
+// 测试验证码规则匹配
+export function testVerificationRules(data: { subject: string; bodyText: string; fromAddress?: string }): Promise<{
+  matched: boolean;
+  code: string | null;
+  rules: Array<{ id: string; type: string; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean }>;
+}> {
+  return request('/verification-rules/test', { method: 'POST', body: JSON.stringify(data) });
+}
+
 // 获取内置规则 + 已关闭列表
 export function getBuiltinVerificationRules(): Promise<{ rules: BuiltinVerificationRule[]; disabled: string[] }> {
   return request('/verification-rules/builtin');
@@ -200,10 +215,18 @@ export function getForwardingRules(): Promise<ForwardingRule[]> {
 }
 
 // 添加转发规则
-export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, targetEmail: string): Promise<ForwardingRule> {
+export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, methodId?: number): Promise<ForwardingRule> {
   return request('/forwarding-rules', {
     method: 'POST',
-    body: JSON.stringify({ type, value, targetEmail }),
+    body: JSON.stringify({ type, value, methodId }),
+  });
+}
+
+// 更新转发规则关联的方法
+export function updateForwardingRuleMethod(id: number, methodId: number | null): Promise<ForwardingRule> {
+  return request(`/forwarding-rules/${id}/method`, {
+    method: 'PUT',
+    body: JSON.stringify({ methodId }),
   });
 }
 
@@ -258,4 +281,54 @@ export function changePassword(oldPassword: string, newPassword: string): Promis
     method: 'PUT',
     body: JSON.stringify({ oldPassword, newPassword }),
   });
+}
+
+// ====== 转发方式 ======
+
+// 获取所有转发方式
+export function getForwardingMethods(): Promise<ForwardingMethod[]> {
+  return request('/forwarding-methods');
+}
+
+// 创建转发方式
+export function addForwardingMethod(type: string, name?: string, target?: string): Promise<ForwardingMethod> {
+  return request('/forwarding-methods', {
+    method: 'POST',
+    body: JSON.stringify({ type, name, target }),
+  });
+}
+
+// 更新转发方式
+export function updateForwardingMethod(id: number, data: { name?: string; target?: string; enabled?: boolean }): Promise<ForwardingMethod> {
+  return request(`/forwarding-methods/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// 删除转发方式
+export function deleteForwardingMethod(id: number): Promise<void> {
+  return request(`/forwarding-methods/${id}`, { method: 'DELETE' });
+}
+
+// 设置默认转发方式
+export function setDefaultForwardingMethod(id: number): Promise<ForwardingMethod> {
+  return request(`/forwarding-methods/${id}/default`, { method: 'POST' });
+}
+
+// ====== Server酱 微信推送 ======
+
+// 测试 Server酱 推送连通性
+export function testServerChan(sendKey: string): Promise<{ sent: boolean }> {
+  return request('/serverchan/test', { method: 'POST', body: JSON.stringify({ sendKey }) });
+}
+
+// 测试企业微信机器人连通性
+export function testWecomBot(webhookUrl: string): Promise<{ sent: boolean }> {
+  return request('/wecom-bot/test', { method: 'POST', body: JSON.stringify({ webhookUrl }) });
+}
+
+// 测试飞书机器人连通性
+export function testFeishuBot(webhookUrl: string): Promise<{ sent: boolean }> {
+  return request('/feishu-bot/test', { method: 'POST', body: JSON.stringify({ webhookUrl }) });
 }
