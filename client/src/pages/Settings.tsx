@@ -18,6 +18,7 @@ import type { SettingsMap, VerificationRule, BuiltinVerificationRule, Forwarding
 const RULE_TYPE_LABEL: Record<string, string> = {
   subject_keyword: '关键词',
   sender_pattern: '发件人匹配',
+  extract_pattern: '提取正则',
 };
 
 const METHOD_TYPE_LABEL: Record<string, string> = {
@@ -587,16 +588,18 @@ export default function Settings() {
                     <p className="text-sm font-medium text-gray-700">自动同步间隔</p>
                     <p className="text-xs text-gray-400 mt-0.5">每隔多久自动同步新邮件</p>
                   </div>
-                  <select value={settings.sync_interval || '2'} onChange={e => set('sync_interval', e.target.value)}
+                    <select value={settings.sync_interval || '2'} onChange={e => set('sync_interval', e.target.value)}
                     className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-8 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_12px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
-                    <option value="0">手动同步</option>
-                    <option value="2">2 分钟</option>
-                    <option value="15">15 分钟</option>
-                    <option value="30">30 分钟</option>
-                    <option value="60">1 小时</option>
-                    <option value="120">2 小时</option>
-                    <option value="240">4 小时</option>
-                  </select>
+                      <option value="0">手动同步</option>
+                      <option value="0.5">30 秒</option>
+                      <option value="1">1 分钟</option>
+                      <option value="2">2 分钟</option>
+                      <option value="15">15 分钟</option>
+                      <option value="30">30 分钟</option>
+                      <option value="60">1 小时</option>
+                      <option value="120">2 小时</option>
+                      <option value="240">4 小时</option>
+                    </select>
                 </div>
                 <div className="flex items-center justify-between">
                   <div>
@@ -701,14 +704,13 @@ export default function Settings() {
                     </label>
                   </div>
 
-                  {/* 统一规则列表 */}
+                  {/* ===== 阶段一：验证码匹配规则 ===== */}
                   <div>
                     <p className="text-sm font-medium text-gray-700 mb-2">
-                      验证码规则 <span className="text-xs text-gray-400 font-normal">（同时匹配主题和正文，支持正则）</span>
+                      验证码规则 <span className="text-xs text-gray-400 font-normal">（判断是否验证码邮件，匹配主题和正文）</span>
                     </p>
-                    <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
-                      {/* 内置规则 */}
-                      {builtinRules.map(rule => {
+                    <div className="space-y-1 max-h-48 overflow-y-auto pr-1 mb-2">
+                      {builtinRules.filter(r => r.type !== 'extract_pattern').map(rule => {
                         const isOff = disabledBuiltin.has(rule.id);
                         return (
                           <div key={rule.id}
@@ -723,7 +725,6 @@ export default function Settings() {
                           </div>
                         );
                       })}
-                      {/* 自定义规则 */}
                       {rules.map(rule => (
                         <div key={`custom_${rule.id}`}
                           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm bg-white border border-gray-100">
@@ -738,18 +739,40 @@ export default function Settings() {
                             className="text-xs px-1.5 py-0.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0">删除</button>
                         </div>
                       ))}
-                      {builtinRules.length === 0 && rules.length === 0 && (
+                      {builtinRules.filter(r => r.type !== 'extract_pattern').length === 0 && rules.length === 0 && (
                         <p className="text-xs text-gray-400 py-2 text-center">暂无规则</p>
                       )}
                     </div>
-                  </div>
-
-                  {/* 添加规则按钮 */}
-                  <div>
                     <button onClick={() => { setShowAddRule(true); setAddRuleType('subject_keyword'); setAddRuleValue(''); }}
                       className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                       + 添加规则
                     </button>
+                  </div>
+
+                  {/* ===== 阶段二：验证码提取规则 ===== */}
+                  <div className="pt-4 border-t border-gray-100">
+                    <p className="text-sm font-medium text-gray-700 mb-1">
+                      验证码提取规则 <span className="text-xs text-gray-400 font-normal">（从正文中提取验证码，按优先级匹配）</span>
+                    </p>
+                    <p className="text-xs text-gray-400 mb-2">关闭某些规则可避免误提取（如 Steam 邮件中的邮编 98009）。</p>
+                    <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
+                      {builtinRules.filter(r => r.type === 'extract_pattern').map(rule => {
+                        const isOff = disabledBuiltin.has(rule.id);
+                        return (
+                          <div key={rule.id}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${isOff ? 'opacity-40' : 'bg-indigo-50/30'}`}>
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-gray-200 text-gray-500 flex-shrink-0 font-mono">
+                              #{rule.id.replace('extract_', '')}
+                            </span>
+                            <code className="text-xs text-gray-700 flex-1 truncate font-mono">{rule.value}</code>
+                            <button onClick={() => handleToggleBuiltin(rule.id)}
+                              className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${isOff ? 'text-gray-400 bg-gray-100' : 'text-green-600 bg-green-50'}`}>
+                              {isOff ? '已关闭' : '已启用'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* 添加规则弹窗 */}
@@ -853,27 +876,54 @@ export default function Settings() {
                     </div>
                   )}
 
-                  {/* 详细匹配结果 — 所有规则逐条显示 */}
+                  {/* 详细匹配结果 — 分两块，只显示命中 */}
                   {testResult !== null && (
-                    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                      {testResult.rules.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-xs text-gray-400">无规则可测试</div>
-                      ) : (
-                        testResult.rules.map(r => (
-                          <div key={r.id}
-                            className={`flex items-center gap-2 px-3 py-2 text-xs ${r.matched ? 'bg-green-50/50' : r.enabled ? '' : 'opacity-40'}`}>
-                            <span className={`flex-shrink-0 font-bold ${r.matched ? 'text-green-600' : 'text-gray-300'}`}>
-                              {r.matched ? '✓' : '○'}
-                            </span>
-                            <span className={`px-1 py-0.5 rounded font-mono ${r.isBuiltin ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'}`}>
-                              {r.isBuiltin ? '内置' : '自定义'}
-                            </span>
-                            <span className="text-gray-500 flex-shrink-0">{RULE_TYPE_LABEL[r.type] || r.type}</span>
-                            <code className="text-gray-700 flex-1 truncate font-mono">{r.value}</code>
-                            {!r.enabled && <span className="text-gray-400 flex-shrink-0">（已停用）</span>}
-                          </div>
-                        ))
-                      )}
+                    <div className="space-y-3">
+                      {/* 验证码规则（命中的） */}
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 mb-1">验证码规则（匹配）</p>
+                        {(() => {
+                          const matched = testResult.rules.filter(r => r.type !== 'extract_pattern' && r.matched);
+                          return matched.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-1">无匹配</p>
+                          ) : (
+                            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                              {matched.map(r => (
+                                <div key={r.id}
+                                  className="flex items-center gap-2 px-3 py-2 text-xs bg-green-50/50">
+                                  <span className="flex-shrink-0 font-bold text-green-600">✓</span>
+                                  <span className={`px-1 py-0.5 rounded font-mono ${r.isBuiltin ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'}`}>
+                                    {r.isBuiltin ? '内置' : '自定义'}
+                                  </span>
+                                  <span className="text-gray-500 flex-shrink-0">{RULE_TYPE_LABEL[r.type]}</span>
+                                  <code className="text-gray-700 flex-1 truncate font-mono">{r.value}</code>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* 提取规则（命中的） */}
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 mb-1">提取规则（匹配）</p>
+                        {(() => {
+                          const matched = testResult.rules.filter(r => r.type === 'extract_pattern' && r.matched);
+                          return matched.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-1">无匹配</p>
+                          ) : (
+                            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                              {matched.map(r => (
+                                <div key={r.id}
+                                  className="flex items-center gap-2 px-3 py-2 text-xs bg-green-50/50">
+                                  <span className="flex-shrink-0 font-bold text-green-600">✓</span>
+                                  <code className="text-gray-700 flex-1 truncate font-mono">{r.value}</code>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                   )}
 

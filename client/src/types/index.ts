@@ -138,7 +138,7 @@ export interface VerificationRule {
 // 内置验证码规则（不可编辑，可关闭）
 export interface BuiltinVerificationRule {
   id: string;
-  type: 'subject_keyword' | 'sender_pattern';
+  type: 'subject_keyword' | 'sender_pattern' | 'extract_pattern';
   value: string;
 }
 
