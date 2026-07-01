@@ -7,6 +7,64 @@ interface SidebarProps {
   onClose: () => void;
 }
 
+const EMAIL_TYPE_MAP: Record<string, string> = {
+  'qq.com': 'QQ',
+  '163.com': '163',
+  '126.com': '126',
+  'gmail.com': 'Gmail',
+  'outlook.com': 'Outlook',
+  'hotmail.com': 'Hotmail',
+  'live.com': 'Live',
+  'yahoo.com': 'Yahoo',
+  'foxmail.com': 'Foxmail',
+  'sina.com': '新浪',
+  'sohu.com': '搜狐',
+  'aliyun.com': '阿里云',
+  'icloud.com': 'iCloud',
+  'proton.me': 'Proton',
+  'pm.me': 'Proton',
+};
+
+const EMAIL_TYPE_COLORS: Record<string, string> = {
+  'QQ': '#1E90FF',
+  '163': '#E53935',
+  '126': '#E53935',
+  'Gmail': '#EA4335',
+  'Outlook': '#0078D4',
+  'Hotmail': '#0078D4',
+  'Live': '#0078D4',
+  'Yahoo': '#6001D2',
+  'Foxmail': '#F90',
+  '新浪': '#FF6A00',
+  '搜狐': '#FF6A00',
+  '阿里云': '#FF6A00',
+  'iCloud': '#555',
+  'Proton': '#8A2BE2',
+};
+
+function getEmailType(email: string): string {
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (!domain) return email;
+  for (const [key, label] of Object.entries(EMAIL_TYPE_MAP)) {
+    if (domain === key || domain.endsWith('.' + key)) return label;
+  }
+  return domain.split('.')[0] || domain;
+}
+
+function getEmailTypeColor(email: string): string {
+  const type = getEmailType(email);
+  return EMAIL_TYPE_COLORS[type] || '#6B7280';
+}
+
+const FOLDERS = [
+  { key: 'INBOX', label: '收件箱', icon: InboxIcon },
+  { key: 'STARRED', label: '星标邮件', icon: StarIcon },
+  { key: 'SENT', label: '已发送', icon: SentIcon },
+  { key: 'DRAFTS', label: '草稿箱', icon: DraftIcon },
+  { key: 'TRASH', label: '已删除', icon: TrashIcon },
+  { key: 'SPAM', label: '垃圾箱', icon: SpamIcon },
+];
+
 export default function Sidebar({ onClose }: SidebarProps) {
   const location = useLocation();
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
@@ -15,35 +73,28 @@ export default function Sidebar({ onClose }: SidebarProps) {
     getAccounts().then(setAccounts).catch(() => {});
   }, [location.pathname]);
 
-  const navLinks = [
-    { path: '/inbox', label: '邮件列表', icon: MailIcon },
-    { path: '/accounts', label: '邮箱管理', icon: SettingsIcon },
-    { path: '/settings', label: '系统设置', icon: GearIcon },
-  ];
+  // 从 URL 解析当前文件夹
+  const searchParams = new URLSearchParams(location.search);
+  const currentFolder = searchParams.get('folder') || 'INBOX';
+  const currentAccountId = searchParams.get('accountId');
 
-  const isActive = (path: string) => location.pathname.startsWith(path);
+  const isFolderActive = (key: string) => {
+    if (key === currentFolder && !currentAccountId) return true;
+    // INBOX is default when no folder specified
+    if (key === 'INBOX' && !currentFolder && !currentAccountId) return true;
+    return false;
+  };
+
+  const isAccountActive = (id: string) => currentAccountId === id;
 
   return (
     <div className="h-full flex flex-col">
-      {/* Logo */}
-      <div className="px-5 py-4 border-b border-gray-100">
-        <Link to="/" className="flex items-center gap-2.5" onClick={onClose}>
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <span className="text-xl font-bold text-gray-800">MailHub</span>
-        </Link>
-      </div>
-
       {/* 写邮件按钮 */}
-      <div className="px-3 pt-4">
+      <div className="px-3 pt-3 pb-2">
         <Link
           to="/compose"
           onClick={onClose}
-          className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+          className="flex items-center justify-center gap-1.5 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm shadow-sm"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -52,64 +103,84 @@ export default function Sidebar({ onClose }: SidebarProps) {
         </Link>
       </div>
 
-      {/* 导航 */}
-      <nav className="px-3 pt-4 flex-1">
-        <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 mb-2">
-          导航
+      {/* 邮件文件夹 */}
+      <nav className="flex-1 overflow-y-auto px-2">
+        <div className="space-y-0.5">
+          {FOLDERS.map(folder => {
+            const active = isFolderActive(folder.key);
+            // 除收件箱外的文件夹特殊处理
+            let target = `/inbox${folder.key !== 'INBOX' ? `?folder=${folder.key}` : ''}`;
+            if (folder.key === 'SENT') target = '/inbox?folder=已发送';
+            if (folder.key === 'TRASH') target = '/inbox?folder=已删除';
+            if (folder.key === 'SPAM') target = '/inbox?folder=垃圾箱';
+            if (folder.key === 'DRAFTS') target = '/inbox?folder=草稿箱';
+            if (folder.key === 'STARRED') target = '/inbox?folder=FLAGGED';
+            return (
+              <Link
+                key={folder.key}
+                to={target}
+                onClick={onClose}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  active
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <folder.icon className={`w-4 h-4 flex-shrink-0 ${active ? 'text-blue-600' : 'text-gray-400'}`} />
+                <span>{folder.label}</span>
+              </Link>
+            );
+          })}
         </div>
-        {navLinks.map(link => (
-          <Link
-            key={link.path}
-            to={link.path}
-            onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors mb-0.5 ${
-              isActive(link.path)
-                ? 'bg-blue-50 text-blue-700 font-medium'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <link.icon className="w-5 h-5" />
-            {link.label}
-          </Link>
-        ))}
 
-        {/* 邮箱账户列表 */}
+        {/* 我的邮箱 */}
         {accounts.length > 0 && (
-          <div className="mt-6">
-            <div className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 mb-2">
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <div className="text-xs font-medium text-gray-400 px-3 mb-1 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 5-7-5" />
+              </svg>
               我的邮箱
             </div>
-              {accounts.map(account => (
-                <Link
-                  key={account.id}
-                  to={`/inbox?accountId=${account.id}`}
-                  onClick={onClose}
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors mb-0.5 ${
-                    isActive('/inbox') && location.search.includes(account.id)
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 shadow-sm"
-                    style={{ backgroundColor: account.avatarColor || '#3B82F6' }}>
-                    {account.avatarName || account.email.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="truncate">{account.name}</span>
-                </Link>
-              ))}
+            {accounts.map(account => (
+              <Link
+                key={account.id}
+                to={`/inbox?accountId=${account.id}`}
+                onClick={onClose}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  isAccountActive(account.id)
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0 shadow-sm"
+                  style={{ backgroundColor: account.avatarColor || '#3B82F6' }}>
+                  {account.avatarName || account.email.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <span className="text-sm truncate">{account.name}</span>
+                  <span className="text-[10px] px-1 py-0.5 rounded font-medium leading-none flex-shrink-0"
+                    style={{ backgroundColor: getEmailTypeColor(account.email) + '20', color: getEmailTypeColor(account.email) }}>
+                    {getEmailType(account.email)}
+                  </span>
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </nav>
 
       {/* 底部版本 */}
-      <div className="px-4 py-3 border-t border-gray-100">
-        <p className="text-xs text-gray-400">MailHub v1.0</p>
+      <div className="px-4 py-2.5 border-t border-gray-100">
+        <p className="text-[10px] text-gray-400">MailHub v1.0</p>
       </div>
     </div>
   );
 }
 
-function MailIcon({ className }: { className?: string }) {
+// ---- SVG Icons ----
+
+function InboxIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -118,22 +189,47 @@ function MailIcon({ className }: { className?: string }) {
   );
 }
 
-function SettingsIcon({ className }: { className?: string }) {
+function StarIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
     </svg>
   );
 }
 
-function GearIcon({ className }: { className?: string }) {
+function SentIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+    </svg>
+  );
+}
+
+function DraftIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+function SpamIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
     </svg>
   );
 }
