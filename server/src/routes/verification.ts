@@ -106,7 +106,7 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
     const disabledBuiltin: string[] = disabledRaw ? JSON.parse(disabledRaw) : [];
     const disabledSet = new Set(disabledBuiltin);
 
-    type MatchedRule = { id: string; type: string; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean };
+    type MatchedRule = { id: string; type: 'subject_keyword' | 'sender_pattern' | 'extract_pattern'; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean };
     const results: MatchedRule[] = [];
 
     // 测试内置规则
@@ -118,6 +118,7 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
           const re = new RegExp(r.value, 'i');
           if (r.type === 'subject_keyword') matched = re.test(subj + ' ' + body);
           else if (r.type === 'sender_pattern') matched = from ? re.test(from) : false;
+          else if (r.type === 'extract_pattern') matched = re.test(subj + ' ' + body);
         } catch { /* 忽略无效正则 */ }
       }
       results.push({ id: r.id, type: r.type, value: r.value, isBuiltin: true, enabled: !isDisabled, matched });
@@ -133,7 +134,7 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
           else if (r.type === 'sender_pattern') matched = from ? re.test(from) : false;
         } catch { /* 忽略无效正则 */ }
       }
-      results.push({ id: `custom_${r.id}`, type: r.type, value: r.value, isBuiltin: false, enabled: !!r.enabled, matched });
+      results.push({ id: `custom_${r.id}`, type: r.type as 'subject_keyword' | 'sender_pattern', value: r.value, isBuiltin: false, enabled: !!r.enabled, matched });
     }
 
     // 运行完整的检测逻辑

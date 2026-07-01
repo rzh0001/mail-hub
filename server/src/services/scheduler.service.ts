@@ -4,7 +4,7 @@ import { syncMails } from './mail.service';
 import { getSetting } from './settings.service';
 import { MAIL_PROVIDERS } from '../types';
 
-const CHECK_INTERVAL_MS = 60_000; // 每分钟检查一次
+const CHECK_INTERVAL_MS = 15_000; // 每15秒检查一次（支持30秒同步间隔）
 let timer: NodeJS.Timeout | null = null;
 const lastSyncTime: Record<string, number> = {}; // account_id -> 上次同步时间戳
 
@@ -38,9 +38,9 @@ async function syncAccountFolders(accountId: string): Promise<void> {
 
 export function startSyncScheduler(): void {
   if (timer) return;
-  console.log('[Scheduler] 自动同步调度器已启动（检查间隔 60 秒）');
+  console.log('[Scheduler] 自动同步调度器已启动（检查间隔 15 秒）');
   timer = setInterval(() => {
-    const intervalMin = parseInt(getSetting('sync_interval') || '2', 10);
+    const intervalMin = parseFloat(getSetting('sync_interval') || '2');
     if (intervalMin <= 0) return; // 手动模式
 
     const intervalMs = intervalMin * 60 * 1000;

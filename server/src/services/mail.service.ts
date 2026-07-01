@@ -40,10 +40,11 @@ const BUILTIN_EXTRACT = [
 ];
 
 // 导出的内置规则列表（用于设置页面展示）
-export function getBuiltinRules(): Array<{ id: string; type: 'subject_keyword' | 'sender_pattern'; value: string }> {
+export function getBuiltinRules(): Array<{ id: string; type: 'subject_keyword' | 'sender_pattern' | 'extract_pattern'; value: string }> {
   const kws = BUILTIN_KEYWORDS_SRC.map((v, i) => ({ id: `kw_${i}`, type: 'subject_keyword' as const, value: v }));
   const snds = BUILTIN_SENDERS_SRC.map((v, i) => ({ id: `sender_${i}`, type: 'sender_pattern' as const, value: v }));
-  return [...kws, ...snds];
+  const extracts = BUILTIN_EXTRACT.map((v, i) => ({ id: `extract_${i}`, type: 'extract_pattern' as const, value: v.source }));
+  return [...kws, ...snds, ...extracts];
 }
 
 interface VCRuleSet {
@@ -94,12 +95,23 @@ export function detectVerificationCode(subject: string, bodyText: string, fromAd
   const allKeywords = [...enabledKeywords, ...cr.keywords];
   const allSenders = [...enabledSenders, ...cr.senders];
 
-  const isVC = allKeywords.some(p => p.test(subject)) || allSenders.some(p => p.test(fromAddress));
-  if (!isVC) return '';
+  // 如果正文简短且内容本身就是纯验证码格式（无关键词上下文时的兜底）
+  const trimmedBody = bodyText.trim();
+  const bodyLooksLikeCode = trimmedBody.length <= 20 && /^[A-Z0-9]{4,8}$/i.test(trimmedBody);
+
+  const isVC = allKeywords.some(p => p.test(subject)) || allKeywords.some(p => p.test(bodyText)) || allSenders.some(p => p.test(fromAddress));
+  if (!isVC) {
+    // 无关键词匹配时，如果正文本身就是验证码格式则直接返回
+    if (bodyLooksLikeCode) return trimmedBody;
+    return '';
+  }
+
+  // 过滤已关闭的提取规则
+  const enabledExtract = BUILTIN_EXTRACT.filter((_, i) => !cr.disabledBuiltin.has(`extract_${i}`));
 
   const maxLen = parseInt(getSetting('verification_code_max_length') || '8', 10);
   const textToSearch = `${bodyText}\n${subject}`;
-  for (const p of BUILTIN_EXTRACT) {
+  for (const p of enabledExtract) {
     // 用全局模式循环匹配，一处匹配被拒绝后继续找下一处
     const re = new RegExp(p.source, p.flags + 'g');
     let m: RegExpExecArray | null;
