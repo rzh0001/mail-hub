@@ -59,17 +59,21 @@ export default function Accounts() {
     }
   }, [form.provider, providers]);
 
-  // 添加账户
+  // 添加账户（添加后立即同步）
   const handleAdd = async () => {
     if (!form.name.trim() || !form.email.trim() || !form.authCode.trim()) {
       setError('请填写完整信息'); return;
     }
     setError('');
     try {
-      await createAccount(form);
+      const account = await createAccount(form);
       setShowForm(false);
       setForm({ name: '', email: '', authCode: '', provider: '163' });
       loadAccounts();
+      // 创建后立即触发同步
+      syncAccount(account.id).then(result => {
+        toast(`同步完成，新增 ${result.synced} 封邮件`, 'success');
+      }).catch(() => {});
     } catch (err: any) { setError(err.message); }
   };
 
@@ -189,8 +193,14 @@ export default function Accounts() {
 
       const result = await importAccounts(accounts);
       setImportResult(result);
-      loadAccounts();
-      toast(`导入完成：成功 ${result.success} 个${result.failed > 0 ? `，失败 ${result.failed} 个` : ''}`,
+      await loadAccounts();
+      // 导入后立即同步所有账户
+      getAccounts().then(allAccounts => {
+        allAccounts.forEach(a => {
+          syncAccount(a.id).catch(() => {});
+        });
+      });
+      toast(`导入完成：成功 ${result.success} 个${result.failed > 0 ? `，失败 ${result.failed} 个` : ''}，正在同步...`,
         result.failed === 0 ? 'success' : 'info');
     } catch (err: any) { toast('导入失败: ' + err.message, 'error'); }
     finally {
