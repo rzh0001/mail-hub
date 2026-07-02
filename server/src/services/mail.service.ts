@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { v4 as uuid } from 'uuid';
 import { getDatabase } from '../database';
-import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, SendMailInput } from '../types';
+import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, ForwardLog, SendMailInput } from '../types';
 import { matchesTrashRule } from './trash.service';
 import { getSetting } from './settings.service';
 
@@ -17,12 +17,7 @@ const BUILTIN_KEYWORDS_SRC = [
   'temporary\\s*password', 'magic\\s*link', 'login\\s*link', 'passcode',
   'apple.*(?:id|code|验证|verify)', 'amazon.*(?:code|otp|验证)',
 ];
-const BUILTIN_SENDERS_SRC = [
-  'noreply', 'no\\.?reply', 'apple\\.com$', 'appleid\\.apple\\.com$', 'amazon\\.',
-];
-
 const BUILTIN_KEYWORDS = BUILTIN_KEYWORDS_SRC.map(s => new RegExp(s, 'i'));
-const BUILTIN_SENDERS = BUILTIN_SENDERS_SRC.map(s => new RegExp(s, 'i'));
 
 const BUILTIN_EXTRACT = [
   // 字母+数字混合验证码（放在纯数字前优先匹配，结尾断言防止截取长串）
@@ -35,21 +30,22 @@ const BUILTIN_EXTRACT = [
   /(?:code|otp|pin|passcode)[：:\s]*(\d{4,8})(?![A-Z0-9])/i,
   /(\d{4,8})\s*(?:is|为|是)\s*(?:your\s+)?(?:verification|code|otp|apple)(?![A-Z0-9])/i,
   /(?:code|otp)\s+is\s+(\d{4,8})(?![A-Z0-9])/i,
-  // 纯数字保底（前后都不能是字母或数字）
+  // 纯数字保底（前后都不能是字母或数字；仅靠自身无法判定上下文，需配合成行检查过滤行内数字）
   /(?<![A-Z0-9])(\d{4,8})(?![A-Z0-9])/i,
 ];
 
+/** 保底提取规则在数组中的索引，仅对其做独立成行检查 */
+const CATCHALL_EXTRACT_INDEX = BUILTIN_EXTRACT.length - 1;
+
 // 导出的内置规则列表（用于设置页面展示）
-export function getBuiltinRules(): Array<{ id: string; type: 'subject_keyword' | 'sender_pattern' | 'extract_pattern'; value: string }> {
+export function getBuiltinRules(): Array<{ id: string; type: 'subject_keyword' | 'extract_pattern'; value: string }> {
   const kws = BUILTIN_KEYWORDS_SRC.map((v, i) => ({ id: `kw_${i}`, type: 'subject_keyword' as const, value: v }));
-  const snds = BUILTIN_SENDERS_SRC.map((v, i) => ({ id: `sender_${i}`, type: 'sender_pattern' as const, value: v }));
   const extracts = BUILTIN_EXTRACT.map((v, i) => ({ id: `extract_${i}`, type: 'extract_pattern' as const, value: v.source }));
-  return [...kws, ...snds, ...extracts];
+  return [...kws, ...extracts];
 }
 
 interface VCRuleSet {
   keywords: RegExp[];
-  senders: RegExp[];
   disabledBuiltin: Set<string>;
 }
 
@@ -71,36 +67,35 @@ function loadCustomRules(): VCRuleSet {
     const db = getDatabase();
     const rows = db.prepare('SELECT type, value FROM verification_rules WHERE enabled = 1').all() as { type: string; value: string }[];
     const keywords: RegExp[] = [];
-    const senders: RegExp[] = [];
     for (const r of rows) {
       try {
         const re = new RegExp(r.value, 'i');
         if (r.type === 'subject_keyword') keywords.push(re);
-        else if (r.type === 'sender_pattern') senders.push(re);
       } catch { /* 忽略无效正则 */ }
     }
-    return { keywords, senders, disabledBuiltin };
+    return { keywords, disabledBuiltin };
   } catch {
-    return { keywords: [], senders: [], disabledBuiltin };
+    return { keywords: [], disabledBuiltin };
   }
 }
 
 export function detectVerificationCode(subject: string, bodyText: string, fromAddress: string, customRules?: VCRuleSet): string {
-  const cr = customRules || { keywords: [], senders: [], disabledBuiltin: new Set() };
+  const cr = customRules || { keywords: [], disabledBuiltin: new Set() };
 
   // 过滤掉已关闭的内置规则
   const enabledKeywords = BUILTIN_KEYWORDS.filter((_, i) => !cr.disabledBuiltin.has(`kw_${i}`));
-  const enabledSenders = BUILTIN_SENDERS.filter((_, i) => !cr.disabledBuiltin.has(`sender_${i}`));
-
   const allKeywords = [...enabledKeywords, ...cr.keywords];
-  const allSenders = [...enabledSenders, ...cr.senders];
 
   // 如果正文简短且内容本身就是纯验证码格式（无关键词上下文时的兜底）
+  // 纯数字 >= 6 位才认为是验证码，避免将 5 位邮编等数字误识别
   const trimmedBody = bodyText.trim();
-  const bodyLooksLikeCode = trimmedBody.length <= 20 && /^[A-Z0-9]{4,8}$/i.test(trimmedBody);
+  const bodyLooksLikeCode = trimmedBody.length <= 20 && (
+    /^[A-Za-z0-9]{4,8}$/.test(trimmedBody) && /[A-Za-z]/.test(trimmedBody) ||
+    /^\d{6,8}$/.test(trimmedBody)
+  );
 
-  const isVC = allKeywords.some(p => p.test(subject)) || allKeywords.some(p => p.test(bodyText)) || allSenders.some(p => p.test(fromAddress));
-  if (!isVC) {
+  const keywordMatch = allKeywords.some(p => p.test(subject)) || allKeywords.some(p => p.test(bodyText));
+  if (!keywordMatch) {
     // 无关键词匹配时，如果正文本身就是验证码格式则直接返回
     if (bodyLooksLikeCode) return trimmedBody;
     return '';
@@ -117,9 +112,13 @@ export function detectVerificationCode(subject: string, bodyText: string, fromAd
     let m: RegExpExecArray | null;
     while ((m = re.exec(textToSearch)) !== null) {
       if (m[1].length > maxLen) continue;
-      // 验证码后面必须是换行/结尾（即单独一行，不含其他字符）
-      const after = textToSearch[m.index + m[0].length];
-      if (after !== undefined && after !== '\n' && after !== '\r') continue;
+      // 仅对保底的纯数字规则做独立成行检查（前后必须是换行/开头/结尾）
+      if (p === BUILTIN_EXTRACT[CATCHALL_EXTRACT_INDEX]) {
+        const before = textToSearch[m.index - 1];
+        if (before !== undefined && before !== '\n' && before !== '\r') continue;
+        const after = textToSearch[m.index + m[0].length];
+        if (after !== undefined && after !== '\n' && after !== '\r') continue;
+      }
       return m[1];
     }
   }
@@ -200,16 +199,13 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
           size: att.size || 0,
         }));
 
-      const mailId = uuid();
-      mailIds.push(mailId);
-
       // 检查垃圾箱规则
       const subject = parsed.subject || '';
       const fromAddress = fromAddr?.address || '';
       const isDeletedByRule = matchesTrashRule(subject, fromAddress) ? 1 : 0;
 
       const mail: MailRow = {
-        id: mailId,
+        id: uuid(),
         account_id: account.id,
         message_uid: msg.uid,
         folder,
@@ -225,15 +221,19 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
         is_read: msg.flags?.has('\\Seen') ? 1 : 0,
         is_flagged: msg.flags?.has('\\Flagged') ? 1 : 0,
         is_deleted: isDeletedByRule,
+        forwarded: 0,
         created_at: new Date().toISOString(),
       };
 
-      db.prepare(`
-        INSERT INTO mails (id, account_id, message_uid, folder, from_name, from_address, to_list, cc_list,
-          subject, body_text, body_html, attachments, received_at, is_read, is_flagged, is_deleted, created_at)
+      // INSERT OR IGNORE + 检查插入是否成功，防止并发重复行进入 mailIds
+      const result = db.prepare(`
+        INSERT OR IGNORE INTO mails (id, account_id, message_uid, folder, from_name, from_address, to_list, cc_list,
+          subject, body_text, body_html, attachments, received_at, is_read, is_flagged, is_deleted, forwarded, created_at)
         VALUES (@id, @account_id, @message_uid, @folder, @from_name, @from_address, @to_list, @cc_list,
-          @subject, @body_text, @body_html, @attachments, @received_at, @is_read, @is_flagged, @is_deleted, @created_at)
+          @subject, @body_text, @body_html, @attachments, @received_at, @is_read, @is_flagged, @is_deleted, @forwarded, @created_at)
       `).run(mail);
+      if (result.changes === 0) continue; // 并发冲突，另一个线程已经插入了这封邮件
+      mailIds.push(mail.id);
 
       // 垃圾箱规则匹配 → 同步删除到 IMAP 服务器
       if (isDeletedByRule) {
@@ -527,7 +527,7 @@ export function getMailList(accountId?: string, folder?: string, page: number = 
 
 // 获取邮件详情
 // 按 UID 从 IMAP 拉取单封邮件的正文并更新数据库
-async function fetchMailBody(account: AccountRow, folder: string, uid: number, mailId: string): Promise<{ bodyText: string; bodyHtml: string } | null> {
+export async function fetchMailBody(account: AccountRow, folder: string, uid: number, mailId: string): Promise<{ bodyText: string; bodyHtml: string } | null> {
   const client = new ImapFlow({
     host: account.imap_host,
     port: account.imap_port,
@@ -587,6 +587,13 @@ export async function getMailDetail(mailId: string): Promise<MailDetail | null> 
   const ccList: string[] = JSON.parse(row.cc_list || '[]');
 
   const customRules = loadCustomRules();
+  const forwardLogs: ForwardLog[] = db.prepare(
+    'SELECT method_type, method_name, forwarded_at FROM mail_forward_log WHERE mail_id = ? ORDER BY id'
+  ).all(mailId).map((r: any) => ({
+    methodType: r.method_type,
+    methodName: r.method_name,
+    forwardedAt: r.forwarded_at,
+  }));
   return {
     id: row.id,
     accountId: row.account_id,
@@ -608,6 +615,7 @@ export async function getMailDetail(mailId: string): Promise<MailDetail | null> 
     bodyText,
     bodyHtml,
     attachments,
+    forwardLogs,
   };
 }
 
