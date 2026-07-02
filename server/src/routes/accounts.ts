@@ -1,13 +1,11 @@
 import { Router, Request, Response } from 'express';
 import * as accountService from '../services/account.service';
-import { syncMails, testImapConnection, sendMail, detectVerificationCode } from '../services/mail.service';
-import { getMatchedForwardTargets } from '../services/forwarding.service';
-import { getEnabledMethods } from '../services/forwarding-method.service';
+import { getDatabase } from '../database';
+import { syncMails, testImapConnection } from '../services/mail.service';
+import { executeForwarding } from '../services/forwarding.service';
 import { pushToWechat } from '../services/serverchan.service';
 import { pushToWecom } from '../services/wecom.service';
 import { pushToFeishu } from '../services/feishu.service';
-import { getDatabase } from '../database';
-import { getSetting } from '../services/settings.service';
 import { updateLastSyncTime } from '../services/scheduler.service';
 import type { CreateAccountInput } from '../types';
 
@@ -132,59 +130,11 @@ router.post('/accounts/:id/sync', async (req: Request, res: Response) => {
             const placeholders = result.mailIds.map(() => '?').join(',');
             const newMails = db.prepare(`SELECT id, subject, body_text, body_html, from_name, from_address FROM mails WHERE id IN (${placeholders})`).all(...result.mailIds) as any[];
             for (const mail of newMails) {
-              // 通用转发规则：使用 getMatchedForwardTargets 按方法分发
-              const targets = getMatchedForwardTargets(mail.subject, mail.from_address);
-              for (const t of targets) {
-                try {
-                  if (t.methodType === 'email') {
-                    await sendMail(account, {
-                      accountId: account.id,
-                      to: [t.methodTarget],
-                      subject: `Fwd: ${mail.subject}`,
-                      body: `---------- 转发邮件 ----------\n发件人: ${mail.from_name} <${mail.from_address}>\n主题: ${mail.subject}\n\n${mail.body_text}`,
-                      isHtml: false,
-                    });
-                  } else if (t.methodType === 'serverchan') {
-                    await pushToWechat('邮件转发通知', `**${mail.from_name}** 的邮件已自动转发\n\n- **发件人**: ${mail.from_name} <${mail.from_address}>\n- **主题**: ${mail.subject}`, t.methodTarget);
-                  } else if (t.methodType === 'wecom_bot') {
-                    await pushToWecom('邮件转发通知', `**${mail.from_name}** 的邮件已自动转发\n\n- **发件人**: ${mail.from_name} <${mail.from_address}>\n- **主题**: ${mail.subject}`, t.methodTarget);
-                  } else if (t.methodType === 'feishu_bot') {
-                    await pushToFeishu('邮件转发通知', `**发件人**: ${mail.from_name} <${mail.from_address}>\n**主题**: ${mail.subject}`, t.methodTarget);
-                  }
-                } catch (forwardErr) {
-                  console.error(`[Sync] 转发邮件 ${mail.id} 失败:`, forwardErr);
-                }
-              }
-              // 验证码转发：使用默认方法
-              const vcForwardEnabled = getSetting('verification_forward_enabled');
-              if (vcForwardEnabled === 'true') {
-                try {
-                  const code = detectVerificationCode(mail.subject, mail.body_text, mail.from_address);
-                  if (code) {
-                    // 使用启用的转发方法列表，过滤掉邮箱自身
-                    const methods = getEnabledMethods().filter(m => m.type !== 'email' || !m.target || m.target !== account.email);
-                    for (const method of methods) {
-                      if (method.type === 'email') {
-                        await sendMail(account, {
-                          accountId: account.id,
-                          to: [method.target],
-                          subject: `[验证码] ${mail.subject}`,
-                          body: `---------- 验证码邮件转发 ----------\n发件人: ${mail.from_name} <${mail.from_address}>\n主题: ${mail.subject}\n验证码: ${code}\n\n${mail.body_text}`,
-                          isHtml: false,
-                        });
-                      } else if (method.type === 'serverchan') {
-                        await pushToWechat('验证码通知', `**${mail.from_name}** 的邮件包含验证码\n\n- **发件人**: ${mail.from_name} <${mail.from_address}>\n- **主题**: ${mail.subject}\n- **验证码**: **${code}**`, method.target);
-                      } else if (method.type === 'wecom_bot') {
-                        await pushToWecom('验证码通知', `**${mail.from_name}** 的邮件包含验证码\n\n- **发件人**: ${mail.from_name} <${mail.from_address}>\n- **主题**: ${mail.subject}\n- **验证码**: **${code}**`, method.target);
-                      } else if (method.type === 'feishu_bot') {
-                        await pushToFeishu('验证码通知', `**发件人**: ${mail.from_name} <${mail.from_address}>\n**主题**: ${mail.subject}\n**验证码**: **${code}**`, method.target);
-                      }
-                    }
-                  }
-                } catch (vcErr) {
-                  console.error(`[Sync] 验证码转发邮件 ${mail.id} 失败:`, vcErr);
-                }
-              }
+              // 原子 claim：这封邮件的转发归我处理
+              const claim = db.prepare('UPDATE mails SET forwarded = 1 WHERE id = ? AND forwarded = 0').run(mail.id);
+              if (claim.changes === 0) continue;
+
+              await executeForwarding(mail, account);
             }
           } catch (forwardErr) {
             console.error('[Sync] 自动转发处理失败:', forwardErr);
