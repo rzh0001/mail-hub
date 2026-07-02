@@ -57,12 +57,12 @@ function getEmailTypeColor(email: string): string {
 }
 
 const FOLDERS = [
-  { key: 'INBOX', label: '收件箱', icon: InboxIcon },
-  { key: 'STARRED', label: '星标邮件', icon: StarIcon },
-  { key: 'SENT', label: '已发送', icon: SentIcon },
-  { key: 'DRAFTS', label: '草稿箱', icon: DraftIcon },
-  { key: 'TRASH', label: '已删除', icon: TrashIcon },
-  { key: 'SPAM', label: '垃圾箱', icon: SpamIcon },
+  { key: 'INBOX', label: '收件箱', icon: InboxIcon, color: '#2563EB' },
+  { key: 'STARRED', label: '星标邮件', icon: StarIcon, color: '#EAB308' },
+  { key: 'SENT', label: '已发送', icon: SentIcon, color: '#16A34A' },
+  { key: 'DRAFTS', label: '草稿箱', icon: DraftIcon, color: '#7C3AED' },
+  { key: 'TRASH', label: '已删除', icon: TrashIcon, color: '#DC2626' },
+  { key: 'SPAM', label: '垃圾箱', icon: SpamIcon, color: '#EA580C' },
 ];
 
 export default function Sidebar({ onClose }: SidebarProps) {
@@ -126,7 +126,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                <folder.icon className={`w-4 h-4 flex-shrink-0 ${active ? 'text-blue-600' : 'text-gray-400'}`} />
+                <folder.icon className="w-4 h-4 flex-shrink-0" style={{ color: active ? '#2563EB' : folder.color }} />
                 <span>{folder.label}</span>
               </Link>
             );
@@ -180,54 +180,54 @@ export default function Sidebar({ onClose }: SidebarProps) {
 
 // ---- SVG Icons ----
 
-function InboxIcon({ className }: { className?: string }) {
+function InboxIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
     </svg>
   );
 }
 
-function StarIcon({ className }: { className?: string }) {
+function StarIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
     </svg>
   );
 }
 
-function SentIcon({ className }: { className?: string }) {
+function SentIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
     </svg>
   );
 }
 
-function DraftIcon({ className }: { className?: string }) {
+function DraftIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
     </svg>
   );
 }
 
-function TrashIcon({ className }: { className?: string }) {
+function TrashIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
     </svg>
   );
 }
 
-function SpamIcon({ className }: { className?: string }) {
+function SpamIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={className} style={style} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
         d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
     </svg>
