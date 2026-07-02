@@ -215,7 +215,7 @@ export function getForwardingRules(): Promise<ForwardingRule[]> {
 }
 
 // 添加转发规则
-export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern', value: string, methodId?: number): Promise<ForwardingRule> {
+export function addForwardingRule(type: 'subject_keyword' | 'sender_pattern' | 'verification_code', value: string, methodId?: number): Promise<ForwardingRule> {
   return request('/forwarding-rules', {
     method: 'POST',
     body: JSON.stringify({ type, value, methodId }),
