@@ -1,6 +1,7 @@
 import { getDatabase } from '../database';
 import { getAllAccountRows } from './account.service';
 import { syncMails } from './mail.service';
+import { executeForwarding } from './forwarding.service';
 import { getSetting } from './settings.service';
 import { MAIL_PROVIDERS } from '../types';
 
@@ -18,6 +19,10 @@ function getFolders(provider: string): string[] {
 }
 
 async function syncAccountFolders(accountId: string): Promise<void> {
+  // 互斥锁：防止同一账户的并发同步
+  if (syncLocks[accountId]) return;
+  syncLocks[accountId] = true;
+  try {
   const db = getDatabase();
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as any;
   if (!account) return;
@@ -27,18 +32,49 @@ async function syncAccountFolders(accountId: string): Promise<void> {
 
   for (const folder of folders) {
     try {
-      await syncMails(account, folder, maxCount);
+      const result = await syncMails(account, folder, maxCount);
+
+      // 自动转发：处理新邮件的转发规则和验证码转发
+      if (result.mailIds.length > 0) {
+        try {
+          const placeholders = result.mailIds.map(() => '?').join(',');
+          const newMails = db.prepare(`SELECT id, subject, body_text, body_html, from_name, from_address, account_id, folder, message_uid FROM mails WHERE id IN (${placeholders})`).all(...result.mailIds) as any[];
+          for (const mail of newMails) {
+            // 原子 claim：这封邮件的转发归我处理，处理完不再处理
+            const claim = db.prepare('UPDATE mails SET forwarded = 1 WHERE id = ? AND forwarded = 0').run(mail.id);
+            if (claim.changes === 0) continue;
+
+            await executeForwarding(mail, account);
+          }
+        } catch (forwardErr) {
+          console.error('[Scheduler] 自动转发处理失败:', forwardErr);
+        }
+      }
     } catch (err) {
       console.error(`[Scheduler] 同步账户 ${account.email} 文件夹 ${folder} 失败:`, err);
     }
   }
 
   lastSyncTime[accountId] = Date.now();
+  } finally { syncLocks[accountId] = false; }
 }
+
+// 每个账户的同步互斥锁，防止并发重叠
+const syncLocks: Record<string, boolean> = {};
 
 export function startSyncScheduler(): void {
   if (timer) return;
   console.log('[Scheduler] 自动同步调度器已启动（检查间隔 15 秒）');
+
+  // 启动时将各账户的上次同步时间初始化为当前时间，避免启动后立即洪水同步
+  const now = Date.now();
+  try {
+    const accounts = getAllAccountRows();
+    for (const a of accounts) {
+      lastSyncTime[a.id] = now;
+    }
+  } catch { /* 忽略 */ }
+
   timer = setInterval(() => {
     const intervalMin = parseFloat(getSetting('sync_interval') || '2');
     if (intervalMin <= 0) return; // 手动模式

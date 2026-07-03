@@ -63,6 +63,13 @@ export interface Attachment {
   size: number;
 }
 
+// 转发日志
+export interface ForwardLog {
+  methodType: string;
+  methodName: string;
+  forwardedAt: string;
+}
+
 // 邮件详情
 export interface MailDetail extends MailSummary {
   toList: string[];
@@ -70,6 +77,7 @@ export interface MailDetail extends MailSummary {
   bodyText: string;
   bodyHtml: string;
   attachments: Attachment[];
+  forwardLogs: ForwardLog[];
 }
 
 // 邮件列表响应
@@ -163,7 +171,7 @@ export interface SendMailInput {
 // 转发规则
 export interface ForwardingRule {
   id: number;
-  type: 'subject_keyword' | 'sender_pattern';
+  type: 'subject_keyword' | 'sender_pattern' | 'verification_code';
   value: string;
   target_email: string;
   method_id: number | null;
@@ -180,6 +188,18 @@ export interface ForwardingMethod {
   enabled: number;
   is_default: number;
   created_at: string;
+}
+
+// 草稿
+export interface Draft {
+  id: string;
+  accountId: string;
+  to: string;
+  cc: string;
+  subject: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // 垃圾箱规则

@@ -85,10 +85,6 @@ export default function Inbox() {
   // 移动端：列表/详情切换
   const [showDetailMobile, setShowDetailMobile] = useState(false);
 
-  // 下拉菜单状态
-  const [showMarkMenu, setShowMarkMenu] = useState(false);
-  const [showMoveMenu, setShowMoveMenu] = useState(false);
-
   // 加载邮件列表
   const loadMails = useCallback(async () => {
     setLoading(true);
@@ -135,6 +131,11 @@ export default function Inbox() {
 
   // 选中邮件
   const handleSelect = (id: string) => {
+    // 草稿箱：点击跳转到写邮件页面编辑
+    if (folder === '草稿箱') {
+      navigate(`/compose/draft/${id}`);
+      return;
+    }
     setSearchParams(prev => {
       prev.set('selected', id);
       return prev;
@@ -325,93 +326,78 @@ export default function Inbox() {
     });
   };
 
+  // 复制地址到剪贴板
+  const copyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      toast('已复制地址: ' + address, 'success');
+    } catch {
+      toast('复制失败', 'error');
+    }
+  };
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // 关闭所有下拉菜单
-  const closeMenus = () => {
-    setShowMarkMenu(false);
-    setShowMoveMenu(false);
+  // 当前邮件的单件操作
+  const handleCurrentMarkRead = async () => {
+    if (!selectedId) return;
+    try {
+      await markRead(selectedId, true);
+      setDetail(prev => prev ? { ...prev, isRead: true } : null);
+      setMails(prev => prev.map(m => m.id === selectedId ? { ...m, isRead: true } : m));
+      toast('已标记为已读', 'success');
+    } catch { toast('操作失败', 'error'); }
+  };
+
+  const handleCurrentMarkUnread = async () => {
+    if (!selectedId) return;
+    try {
+      await markRead(selectedId, false);
+      setDetail(prev => prev ? { ...prev, isRead: false } : null);
+      setMails(prev => prev.map(m => m.id === selectedId ? { ...m, isRead: false } : m));
+      toast('已标记为未读', 'success');
+    } catch { toast('操作失败', 'error'); }
+  };
+
+  // 验证码待办 — 跳转到设置页的验证码规则测试区
+  const handleVerificationTodo = () => {
+    if (selectedId) {
+      // 使用 localStorage 传递邮件 ID，Settings 页面读取后自动填入测试区
+      localStorage.setItem('verification_test_mail_id', selectedId);
+      navigate('/settings');
+    }
   };
 
   // ------------- 渲染 -------------
   return (
-    <div className="h-full flex" onClick={closeMenus}>
+    <div className="h-full flex">
       {/* ===== 左侧：邮件列表 ===== */}
       <div className={`w-full lg:w-[420px] xl:w-[480px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col ${
         showDetailMobile ? 'hidden lg:flex' : 'flex'
       }`}>
-        {/* ===== QQ邮箱风格工具栏 ===== */}
-        <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-1.5 flex-wrap">
-          <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer mr-0.5">
+        {/* ===== 左侧精简工具栏：仅全选 + 总数 + 同步 ===== */}
+        <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-1.5">
+          <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer">
             <input type="checkbox" checked={allSelected}
               onChange={handleSelectAll}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
             <span className="text-xs select-none hidden sm:inline">全选</span>
           </label>
 
-          <div className="w-px h-4 bg-gray-200 mx-0.5" />
-
-          <button onClick={() => {
-            if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; }
-            handleBatchDelete();
-          }} disabled={batchLoading}
-            className="px-2 py-1 text-xs text-gray-600 rounded hover:bg-gray-100 transition-colors disabled:opacity-50">
-            删除
-          </button>
-
-          <button onClick={() => {
-            if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; }
-            handleBatchRead();
-          }} disabled={batchLoading}
-            className="px-2 py-1 text-xs text-gray-600 rounded hover:bg-gray-100 transition-colors disabled:opacity-50">
-            标记已读
-          </button>
-
-          <div className="relative">
-            <button onClick={e => { e.stopPropagation(); setShowMarkMenu(!showMarkMenu); setShowMoveMenu(false); }}
-              className="px-2 py-1 text-xs text-gray-600 rounded hover:bg-gray-100 transition-colors flex items-center gap-0.5">
-              标记为
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showMarkMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]"
-                onClick={e => e.stopPropagation()}>
-                <button onClick={() => { closeMenus(); if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; } handleBatchRead(); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">标记已读</button>
-                <button onClick={() => { closeMenus(); if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; } handleBatchUnread(); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">标记未读</button>
-                <button onClick={() => { closeMenus(); if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; } handleBatchFlag(); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">标记星标</button>
-              </div>
-            )}
-          </div>
-
-          <div className="relative">
-            <button onClick={e => { e.stopPropagation(); setShowMoveMenu(!showMoveMenu); setShowMarkMenu(false); }}
-              className="px-2 py-1 text-xs text-gray-600 rounded hover:bg-gray-100 transition-colors flex items-center gap-0.5">
-              移动到
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showMoveMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-[120px]"
-                onClick={e => e.stopPropagation()}>
-                <button onClick={() => { closeMenus(); if (selectedIds.size === 0) { toast('请先选择邮件', 'info'); return; } handleBatchDelete(); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">已删除</button>
-              </div>
-            )}
-          </div>
-
-          <span className="ml-auto text-xs text-gray-400 flex-shrink-0">
+          <span className="ml-auto text-xs text-black flex-shrink-0">
             共 {displayTotal} 封
           </span>
+
+          <button onClick={handleSync} disabled={syncing}
+            className="p-1.5 text-black hover:text-blue-600 rounded-lg transition-colors disabled:opacity-40" title="同步邮件">
+            <svg className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
         </div>
 
         {/* ===== 同步进度条 ===== */}
@@ -488,7 +474,7 @@ export default function Inbox() {
                       return (
                         <div key={mail.id}
                           className={`flex items-stretch cursor-pointer hover:bg-gray-50 transition-colors ${
-                            !mail.isRead ? 'bg-white' : 'bg-gray-50/30'
+                            mail.id === selectedId ? 'bg-blue-50' : !mail.isRead ? 'bg-white' : 'bg-gray-50/30'
                           }`}
                         >
                           {/* 左侧：复选框 + 头像（垂直居中） */}
@@ -575,10 +561,122 @@ export default function Inbox() {
         )}
       </div>
 
-      {/* ===== 右侧：邮件详情（保持原有设计） ===== */}
+      {/* ===== 右侧：固定工具栏 + 内容区 ===== */}
       <div className={`flex-1 min-w-0 bg-white flex flex-col ${
         !showDetailMobile ? 'hidden lg:flex' : 'flex'
       }`}>
+        {/* ===== 固定功能区（始终显示） ===== */}
+        <div className="px-5 py-2.5 border-b border-gray-100 flex items-center gap-2 flex-shrink-0">
+          <button onClick={handleBack} className="lg:hidden p-1 hover:bg-gray-100 rounded-lg mr-1">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <span className="text-xs text-gray-400 mr-auto">邮件操作</span>
+
+          {/* 已读 / 未读 / 测试 按钮 */}
+          {selectedId && detail ? (
+            <>
+              <button onClick={handleCurrentMarkRead}
+                className="px-2 py-1 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                已读
+              </button>
+              <button onClick={handleCurrentMarkUnread}
+                className="px-2 py-1 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                未读
+              </button>
+              <button onClick={handleVerificationTodo}
+                className="px-2 py-1 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                测试
+              </button>
+            </>
+          ) : (
+            <>
+              <button disabled className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                已读
+              </button>
+              <button disabled className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                未读
+              </button>
+              <button disabled className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                测试
+              </button>
+            </>
+          )}
+
+          {selectedId && detail ? (
+            <button onClick={handleReply}
+              className="px-2 py-1 text-xs text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+              </svg>
+              回复
+            </button>
+          ) : (
+            <button disabled
+              className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+              </svg>
+              回复
+            </button>
+          )}
+
+          {selectedId && detail ? (
+            <button onClick={handleFlag}
+              className={`px-2 py-1 text-xs rounded-lg transition-colors flex items-center gap-1 border ${detail.isFlagged ? 'text-yellow-700 bg-yellow-50 border-yellow-200' : 'text-yellow-600 bg-yellow-50/50 border-yellow-200 hover:bg-yellow-100'}`}
+              title={detail.isFlagged ? '取消星标' : '标记星标'}>
+              <svg className="w-3.5 h-3.5" fill={detail.isFlagged ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+              {detail.isFlagged ? '取消星标' : '星标'}
+            </button>
+          ) : (
+            <button disabled className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1" title="标记星标">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+              星标
+            </button>
+          )}
+
+          {selectedId && detail ? (
+            <button onClick={handleDelete} className="px-2 py-1 text-xs text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 rounded-lg transition-colors flex items-center gap-1" title="删除">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              删除
+            </button>
+          ) : (
+            <button disabled className="px-2 py-1 text-xs text-gray-300 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed flex items-center gap-1" title="删除">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              删除
+            </button>
+          )}
+        </div>
+
+        {/* ===== 内容区 ===== */}
         {!selectedId || !detail ? (
           <div className="flex-1 flex items-center justify-center text-gray-300">
             {detailLoading ? (
@@ -598,107 +696,115 @@ export default function Inbox() {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
           </div>
         ) : (
-          <div className="h-full flex flex-col">
-            {/* 详情顶部操作栏 */}
-            <div className="px-5 py-2.5 border-b border-gray-100 flex items-center gap-2">
-              <button onClick={handleBack} className="lg:hidden p-1 hover:bg-gray-100 rounded-lg mr-1">
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-
-              <span className="text-xs text-gray-400 mr-auto">邮件详情</span>
-
-              <button onClick={handleReply}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                </svg>
-                回复
-              </button>
-
-              <button onClick={handleFlag}
-                className={`p-1.5 rounded-lg transition-colors ${detail.isFlagged ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
-                title={detail.isFlagged ? '取消星标' : '标记星标'}>
-                <svg className="w-4 h-4" fill={detail.isFlagged ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                </svg>
-              </button>
-
-              <button onClick={handleDelete} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="删除">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
-
-            {/* 详情内容 */}
-            <div ref={detailRef} className="flex-1 overflow-y-auto">
-              <div className="max-w-3xl px-6 py-5">
-                <h1 className="text-xl font-semibold text-gray-900 mb-4">{detail.subject || '(无主题)'}</h1>
+          <div ref={detailRef} className="flex-1 overflow-y-auto">
+            <div className="max-w-3xl px-6 py-5">
+              <h1 className="text-xl font-semibold text-gray-900 mb-4">{detail.subject || '(无主题)'}</h1>
 
                 <div className="bg-gray-50 rounded-xl p-4 space-y-2 mb-5 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-16 flex-shrink-0">发件人</span>
-                    <span className="font-medium text-gray-800">
-                      {detail.fromName ? `${detail.fromName} <${detail.fromAddress}>` : detail.fromAddress}
-                    </span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="text-gray-400 w-16 flex-shrink-0">收件人</span>
-                    <span className="text-gray-700">{detail.toList.join(', ') || '未指定'}</span>
-                  </div>
-                  {detail.ccList.length > 0 && (
-                    <div className="flex items-start gap-2">
-                      <span className="text-gray-400 w-16 flex-shrink-0">抄送</span>
-                      <span className="text-gray-700">{detail.ccList.join(', ')}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-16 flex-shrink-0">时间</span>
-                    <span className="text-gray-700">{formatDateFull(detail.receivedAt)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-16 flex-shrink-0">账户</span>
-                    <span className="text-gray-700">{detail.accountName} ({detail.accountEmail})</span>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 w-16 flex-shrink-0">发件人</span>
+                  <span className="font-medium text-gray-800">
+                    {detail.fromName ? `${detail.fromName} <${detail.fromAddress}>` : detail.fromAddress}
+                  </span>
+                  <button onClick={() => copyAddress(detail.fromAddress)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                    title="复制地址">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
                 </div>
-
-                {detail.attachments.length > 0 && (
-                  <div className="mb-5">
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">附件 ({detail.attachments.length})</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {detail.attachments.map((att, i) => (
-                        <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
-                          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          <span className="text-sm text-gray-600">{att.filename}</span>
-                          <span className="text-xs text-gray-400">({formatSize(att.size)})</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {detail.bodyHtml && (
-                  <div className="mb-3">
-                    <button onClick={() => setShowRaw(!showRaw)} className="text-sm text-blue-600 hover:text-blue-700">
-                      {showRaw ? '查看 HTML 格式' : '查看纯文本'}
+                <div className="flex items-start gap-2">
+                  <span className="text-gray-400 w-16 flex-shrink-0">收件人</span>
+                  <span className="text-gray-700">{detail.toList.join(', ') || '未指定'}</span>
+                  {detail.toList.length > 0 && (
+                    <button onClick={() => copyAddress(detail.toList.join(', '))}
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+                      title="复制地址">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {detail.ccList.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-400 w-16 flex-shrink-0">抄送</span>
+                    <span className="text-gray-700">{detail.ccList.join(', ')}</span>
+                    <button onClick={() => copyAddress(detail.ccList.join(', '))}
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+                      title="复制地址">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
                     </button>
                   </div>
                 )}
-
-                <div className="border-t border-gray-100 pt-5">
-                  {detail.bodyHtml && !showRaw ? (
-                    <div className="mail-body text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(detail.bodyHtml) }} />
-                  ) : (
-                    <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
-                      {detail.bodyText || '(无内容)'}
-                    </pre>
-                  )}
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 w-16 flex-shrink-0">时间</span>
+                  <span className="text-gray-700">{formatDateFull(detail.receivedAt)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 w-16 flex-shrink-0">账户</span>
+                  <span className="text-gray-700">{detail.accountName} ({detail.accountEmail})</span>
                 </div>
               </div>
+
+              {detail.attachments.length > 0 && (
+                <div className="mb-5">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">附件 ({detail.attachments.length})</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {detail.attachments.map((att, i) => (
+                      <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200">
+                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                        <span className="text-sm text-gray-600">{att.filename}</span>
+                        <span className="text-xs text-gray-400">({formatSize(att.size)})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {detail.bodyHtml && (
+                <div className="mb-3">
+                  <button onClick={() => setShowRaw(!showRaw)} className="text-sm text-blue-600 hover:text-blue-700">
+                    {showRaw ? '查看 HTML 格式' : '查看纯文本'}
+                  </button>
+                </div>
+              )}
+
+              <div className="border-t border-gray-100 pt-5">
+                {detail.bodyHtml && !showRaw ? (
+                  <div className="mail-body text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(detail.bodyHtml) }} />
+                ) : (
+                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
+                    {detail.bodyText || '(无内容)'}
+                  </pre>
+                )}
+              </div>
+
+              {detail.forwardLogs && detail.forwardLogs.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-green-600 font-medium">已转发</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detail.forwardLogs.map((log, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded text-xs border border-green-200">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                          </svg>
+                          {log.methodName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

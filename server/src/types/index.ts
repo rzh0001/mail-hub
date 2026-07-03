@@ -117,6 +117,7 @@ export interface MailRow {
   is_read: number;
   is_flagged: number;
   is_deleted: number;
+  forwarded: number;
   created_at: string;
 }
 
@@ -146,6 +147,13 @@ export interface Attachment {
   size: number;
 }
 
+// 转发日志
+export interface ForwardLog {
+  methodType: string;
+  methodName: string;
+  forwardedAt: string;
+}
+
 // 邮件详情
 export interface MailDetail extends MailSummary {
   toList: string[];
@@ -153,6 +161,7 @@ export interface MailDetail extends MailSummary {
   bodyText: string;
   bodyHtml: string;
   attachments: Attachment[];
+  forwardLogs: ForwardLog[];
 }
 
 // 更新账户输入
@@ -179,7 +188,7 @@ export interface SendMailInput {
 // 转发规则（数据库行）
 export interface ForwardingRuleRow {
   id: number;
-  type: 'subject_keyword' | 'sender_pattern';
+  type: 'subject_keyword' | 'sender_pattern' | 'verification_code';
   value: string;
   target_email: string;
   method_id: number | null;

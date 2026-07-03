@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getSettings, updateSettings,
@@ -18,6 +18,7 @@ import type { SettingsMap, VerificationRule, BuiltinVerificationRule, Forwarding
 const RULE_TYPE_LABEL: Record<string, string> = {
   subject_keyword: '关键词',
   sender_pattern: '发件人匹配',
+  verification_code: '验证码',
   extract_pattern: '提取正则',
 };
 
@@ -165,10 +166,11 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newVcTarget, setNewVcTarget] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 添加规则弹窗
   const [showAddRule, setShowAddRule] = useState(false);
-  const [addRuleType, setAddRuleType] = useState<'subject_keyword' | 'sender_pattern'>('subject_keyword');
+  const [addRuleType, setAddRuleType] = useState<'subject_keyword'>('subject_keyword');
   const [addRuleValue, setAddRuleValue] = useState('');
   const [addRuleLoading, setAddRuleLoading] = useState(false);
   const { autoLockMinutes, setAutoLockMinutes } = useAuth();
@@ -186,6 +188,23 @@ export default function Settings() {
   const [testFrom, setTestFrom] = useState('');
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ matched: boolean; code: string | null; rules: Array<{ id: string; type: string; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean }> } | null>(null);
+
+  // 从 Inbox 的验证码待办跳转过来时，自动加载邮件到测试区
+  useEffect(() => {
+    const pendingMailId = localStorage.getItem('verification_test_mail_id');
+    if (pendingMailId) {
+      localStorage.removeItem('verification_test_mail_id');
+      setActiveSection('verification');
+      getMail(pendingMailId).then(mail => {
+        setTestFrom(mail.fromAddress || '');
+        setTestSubject(mail.subject || '');
+        setTestBody(mail.bodyText || '');
+        toast('已加载邮件内容，点击「测试匹配」开始测试', 'info');
+      }).catch(() => {
+        toast('加载邮件失败', 'error');
+      });
+    }
+  }, [toast]);
 
   // 邮件选择弹窗
   const [showMailPicker, setShowMailPicker] = useState(false);
@@ -205,7 +224,7 @@ export default function Settings() {
   // 转发规则
   const [forwardingRules, setForwardingRules] = useState<ForwardingRule[]>([]);
   const [forwardingMethods, setForwardingMethods] = useState<ForwardingMethod[]>([]);
-  const [newForwardingType, setNewForwardingType] = useState<'subject_keyword' | 'sender_pattern'>('subject_keyword');
+  const [newForwardingType, setNewForwardingType] = useState<'subject_keyword' | 'sender_pattern' | 'verification_code'>('subject_keyword');
   const [newForwardingValue, setNewForwardingValue] = useState('');
   const [newForwardingMethodId, setNewForwardingMethodId] = useState<number>(-1);
   // 转发规则编辑中的 methodId
@@ -355,8 +374,8 @@ export default function Settings() {
 
   // --- 转发规则 ---
   const handleAddForwardingRule = async () => {
-    const val = newForwardingValue.trim();
-    if (!val) { toast('请输入规则内容', 'error'); return; }
+    const val = newForwardingType !== 'verification_code' ? newForwardingValue.trim() : '';
+    if (!val && newForwardingType !== 'verification_code') { toast('请输入规则内容', 'error'); return; }
     const methodId = newForwardingMethodId > 0 ? newForwardingMethodId : undefined;
     try {
       const rule = await addForwardingRule(newForwardingType, val, methodId);
@@ -509,6 +528,107 @@ export default function Settings() {
     }
   };
 
+  // --- 配置导出/导入 ---
+  const [importing, setImporting] = useState(false);
+
+  const handleExportConfig = async () => {
+    try {
+      const [s, r, b, f, m, t, fm] = await Promise.all([
+        getSettings(), getVerificationRules(), getBuiltinVerificationRules(),
+        getForwardingRules(), getForwardingMethods(), getTrashRules(), getForwardingMethods(),
+      ]);
+      const config = {
+        exportedAt: new Date().toISOString(),
+        version: 1,
+        settings: s,
+        verificationRules: r,
+        disabledBuiltinRules: [...b.disabled],
+        forwardingRules: f,
+        forwardingMethods: fm,
+        trashRules: t,
+      };
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mail-hub-config-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('配置已导出', 'success');
+    } catch { toast('导出配置失败', 'error'); }
+  };
+
+  const handleImportConfig = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const config = JSON.parse(text);
+      if (!config.settings) { toast('无效的配置文件', 'error'); return; }
+
+      // 1. 恢复设置
+      await updateSettings(config.settings);
+      // 2. 恢复内置规则开关
+      if (config.disabledBuiltinRules) {
+        await updateDisabledBuiltinRules(config.disabledBuiltinRules);
+      }
+      // 3. 恢复验证码规则 — 先删后建
+      if (config.verificationRules) {
+        const existingRules = await getVerificationRules();
+        for (const rule of existingRules) {
+          await deleteVerificationRule(rule.id);
+        }
+        for (const rule of config.verificationRules) {
+          await addVerificationRule(rule.type, rule.value);
+        }
+      }
+      // 4. 恢复垃圾箱规则 — 先删后建
+      if (config.trashRules) {
+        const existingTrash = await getTrashRules();
+        for (const rule of existingTrash) {
+          await deleteTrashRule(rule.id);
+        }
+        for (const rule of config.trashRules) {
+          await addTrashRule(rule.type, rule.value);
+        }
+      }
+      // 5. 恢复转发规则 — 先删后建
+      if (config.forwardingRules) {
+        const existingFwd = await getForwardingRules();
+        for (const rule of existingFwd) {
+          await deleteForwardingRule(rule.id);
+        }
+        for (const rule of config.forwardingRules) {
+          const methodId = rule.method_id ?? undefined;
+          await addForwardingRule(rule.type, rule.value, methodId);
+        }
+      }
+      // 6. 恢复转发方式 — 先删后建
+      if (config.forwardingMethods) {
+        const existingMethods = await getForwardingMethods();
+        for (const m of existingMethods) {
+          await deleteForwardingMethod(m.id);
+        }
+        for (const m of config.forwardingMethods) {
+          await addForwardingMethod(m.type, m.name, m.target);
+        }
+        // 如果有默认方法，在重建后设置
+        const defaultMethod = config.forwardingMethods.find((m: any) => m.is_default);
+        if (defaultMethod) {
+          const newMethods = await getForwardingMethods();
+          const match = newMethods.find((nm: ForwardingMethod) => nm.name === defaultMethod.name && nm.type === defaultMethod.type);
+          if (match) await setDefaultForwardingMethod(match.id);
+        }
+      }
+
+      // 重新加载所有数据
+      await loadData();
+      toast('配置已导入', 'success');
+    } catch { toast('导入配置失败', 'error'); }
+    finally { setImporting(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+  };
+
   const [activeSection, setActiveSection] = useState('sync');
 
   const SIDEBAR_ITEMS = [
@@ -566,6 +686,15 @@ export default function Settings() {
               {SIDEBAR_ITEMS.find(i => i.key === activeSection)?.label || '设置'}
             </h1>
             <div className="flex items-center gap-2">
+              <button onClick={handleExportConfig}
+                className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
+                导出配置
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} disabled={importing}
+                className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50">
+                {importing ? '导入中...' : '导入配置'}
+              </button>
+              <input ref={fileInputRef} type="file" accept=".json" onChange={handleImportConfig} className="hidden" />
               <button onClick={() => { loadData(); toast('已刷新', 'info'); }}
                 className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                 刷新
@@ -591,6 +720,7 @@ export default function Settings() {
                     <select value={settings.sync_interval || '2'} onChange={e => set('sync_interval', e.target.value)}
                     className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-8 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_12px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
                       <option value="0">手动同步</option>
+                      <option value="0.25">15 秒</option>
                       <option value="0.5">30 秒</option>
                       <option value="1">1 分钟</option>
                       <option value="2">2 分钟</option>
@@ -733,7 +863,7 @@ export default function Settings() {
                           <code className="text-xs text-gray-700 flex-1 truncate font-mono">{rule.value}</code>
                           <button onClick={() => handleToggleRule(rule.id)}
                             className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                            {rule.enabled ? '启用' : '停用'}
+                            {rule.enabled ? '已启用' : '已关闭'}
                           </button>
                           <button onClick={() => handleDeleteRule(rule.id)}
                             className="text-xs px-1.5 py-0.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0">删除</button>
@@ -786,7 +916,6 @@ export default function Settings() {
                             <select value={addRuleType} onChange={e => setAddRuleType(e.target.value as any)}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-8 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_12px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
                               <option value="subject_keyword">关键词</option>
-                              <option value="sender_pattern">发件人匹配</option>
                             </select>
                           </div>
                           <div>
@@ -794,7 +923,7 @@ export default function Settings() {
                             <input type="text" value={addRuleValue}
                               onChange={e => setAddRuleValue(e.target.value)}
                               onKeyDown={e => e.key === 'Enter' && !addRuleLoading && handleAddRule()}
-                              placeholder={addRuleType === 'subject_keyword' ? '例如: 安全码' : '例如: @example\\.com'}
+                              placeholder="例如: 安全码"
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
                           </div>
                         </div>
@@ -847,7 +976,7 @@ export default function Settings() {
                     <textarea value={testBody}
                       onChange={e => setTestBody(e.target.value)}
                       placeholder="验证码：123456，请勿泄露给他人"
-                      rows={3}
+                      rows={6}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-y" />
                   </div>
 
@@ -860,7 +989,7 @@ export default function Settings() {
 
                   {/* 匹配结果总览 */}
                   {testResult !== null && (
-                    <div className={`rounded-lg px-4 py-3 ${testResult.matched ? 'bg-green-50 border border-green-200' : 'bg-gray-50 border border-gray-200'}`}>
+                    <div className={`rounded-lg px-4 py-3 ${testResult.code ? 'bg-green-50 border border-green-200' : testResult.matched ? 'bg-yellow-50 border border-yellow-200' : 'bg-gray-50 border border-gray-200'}`}>
                       {testResult.code ? (
                         <div className="text-center">
                           <p className="text-xs text-gray-500 mb-1">识别到验证码</p>
@@ -868,8 +997,8 @@ export default function Settings() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-medium ${testResult.matched ? 'text-green-600' : 'text-gray-400'}`}>
-                            {testResult.matched ? '✓ 已有规则匹配' : '○ 无规则匹配'}
+                          <span className={`text-sm font-medium ${testResult.matched ? 'text-yellow-600' : 'text-gray-400'}`}>
+                            {testResult.matched ? '! 规则匹配文本但未提取到验证码' : '○ 无规则匹配'}
                           </span>
                         </div>
                       )}
@@ -890,8 +1019,8 @@ export default function Settings() {
                             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
                               {matched.map(r => (
                                 <div key={r.id}
-                                  className="flex items-center gap-2 px-3 py-2 text-xs bg-green-50/50">
-                                  <span className="flex-shrink-0 font-bold text-green-600">✓</span>
+                                  className={`flex items-center gap-2 px-3 py-2 text-xs ${testResult.code ? 'bg-green-50/50' : 'bg-yellow-50/50'}`}>
+                                  <span className={`flex-shrink-0 font-bold ${testResult.code ? 'text-green-600' : 'text-yellow-600'}`}>✓</span>
                                   <span className={`px-1 py-0.5 rounded font-mono ${r.isBuiltin ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-600'}`}>
                                     {r.isBuiltin ? '内置' : '自定义'}
                                   </span>
@@ -915,8 +1044,8 @@ export default function Settings() {
                             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
                               {matched.map(r => (
                                 <div key={r.id}
-                                  className="flex items-center gap-2 px-3 py-2 text-xs bg-green-50/50">
-                                  <span className="flex-shrink-0 font-bold text-green-600">✓</span>
+                                  className={`flex items-center gap-2 px-3 py-2 text-xs ${testResult.code ? 'bg-green-50/50' : 'bg-yellow-50/50'}`}>
+                                  <span className={`flex-shrink-0 font-bold ${testResult.code ? 'text-green-600' : 'text-yellow-600'}`}>✓</span>
                                   <code className="text-gray-700 flex-1 truncate font-mono">{r.value}</code>
                                 </div>
                               ))}
@@ -1010,7 +1139,7 @@ export default function Settings() {
                             </select>
                             <button onClick={() => handleToggleForwardingRule(rule.id)}
                               className={`text-xs px-1.5 py-0.5 rounded ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                              {rule.enabled ? '启用' : '停用'}
+                              {rule.enabled ? '已启用' : '已关闭'}
                             </button>
                             <button onClick={() => handleDeleteForwardingRule(rule.id)}
                               className="text-xs text-red-400 hover:text-red-600 flex-shrink-0">删除</button>
@@ -1025,13 +1154,20 @@ export default function Settings() {
                       className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-7 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_8px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
                       <option value="subject_keyword">主题关键词</option>
                       <option value="sender_pattern">发件人匹配</option>
+                      <option value="verification_code">验证码</option>
                     </select>
-                    <input type="text"
-                      placeholder={newForwardingType === 'subject_keyword' ? '例如: 账单' : '例如: @newsletter\\.com'}
-                      value={newForwardingValue}
-                      onChange={e => setNewForwardingValue(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleAddForwardingRule()}
-                      className="flex-1 min-w-[120px] px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                    {newForwardingType !== 'verification_code' ? (
+                      <input type="text"
+                        placeholder={newForwardingType === 'subject_keyword' ? '例如: 账单' : '例如: @newsletter\\.com'}
+                        value={newForwardingValue}
+                        onChange={e => setNewForwardingValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddForwardingRule()}
+                        className="flex-1 min-w-[120px] px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
+                    ) : (
+                      <span className="flex-1 min-w-[120px] px-2 py-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg">
+                        自动识别验证码邮件
+                      </span>
+                    )}
                     <select value={newForwardingMethodId} onChange={e => setNewForwardingMethodId(parseInt(e.target.value))}
                       className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 appearance-none bg-white pr-7 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23999%22%20d%3D%22M6%209L1%203h10z%22/%3E%3C/svg%3E')] bg-[length:12px] bg-[right_8px_center] bg-no-repeat cursor-pointer hover:border-gray-400 transition-colors">
                       <option value={-1}>使用默认转发方式</option>
@@ -1044,31 +1180,7 @@ export default function Settings() {
                       添加
                     </button>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">支持正则表达式，不区分大小写。添加后下次同步邮件时生效。</p>
-                </div>
-
-                <div className="border-t border-gray-100" />
-
-                {/* ---- 验证码转发 ---- */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">验证码转发</p>
-                      <p className="text-xs text-gray-400 mt-0.5">检测到验证码时自动通过启用的转发方式分发</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox"
-                        checked={settings.verification_forward_enabled === 'true'}
-                        onChange={e => set('verification_forward_enabled', e.target.checked ? 'true' : 'false')}
-                        className="sr-only peer" />
-                      <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
-                    </label>
-                  </div>
-                  {settings.verification_forward_enabled === 'true' && (
-                    <div className="pl-2">
-                      <p className="text-xs text-gray-400">验证码将通过「<strong>转发方式</strong>」页面中所有启用的方式分发（邮件、Server酱、企业微信、飞书）。</p>
-                    </div>
-                  )}
+                  <p className="text-xs text-gray-400 mt-2">验证码规则自动使用验证码格式（标题=发件人+验证码，正文=邮件正文）。添加后下次同步邮件时生效。</p>
                 </div>
 
               </div>
@@ -1131,7 +1243,7 @@ export default function Settings() {
                         <code className="text-xs text-gray-700 flex-1 truncate font-mono">{rule.value}</code>
                         <button onClick={() => handleToggleTrashRule(rule.id)}
                           className={`text-xs px-1.5 py-0.5 rounded ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                          {rule.enabled ? '启用' : '停用'}
+                          {rule.enabled ? '已启用' : '已关闭'}
                         </button>
                         <button onClick={() => handleDeleteTrashRule(rule.id)}
                           className="text-xs text-red-400 hover:text-red-600 flex-shrink-0">删除</button>

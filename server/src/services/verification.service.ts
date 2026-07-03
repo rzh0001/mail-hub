@@ -2,7 +2,7 @@ import { getDatabase } from '../database';
 
 export interface VerificationRuleRow {
   id: number;
-  type: 'subject_keyword' | 'sender_pattern';
+  type: 'subject_keyword';
   value: string;
   enabled: number;
   created_at: string;
@@ -21,7 +21,7 @@ export function getAllRules(): VerificationRuleRow[] {
 }
 
 // 添加规则
-export function addRule(type: 'subject_keyword' | 'sender_pattern', value: string): VerificationRuleRow {
+export function addRule(type: 'subject_keyword', value: string): VerificationRuleRow {
   const db = getDatabase();
   const now = new Date().toISOString();
   const result = db.prepare('INSERT INTO verification_rules (type, value, enabled, created_at) VALUES (?, ?, 1, ?)').run(type, value, now);

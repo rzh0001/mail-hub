@@ -44,8 +44,8 @@ router.post('/verification-rules', (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: '请提供 type 和 value' });
       return;
     }
-    if (!['subject_keyword', 'sender_pattern'].includes(type)) {
-      res.status(400).json({ success: false, error: 'type 必须是 subject_keyword 或 sender_pattern' });
+    if (type !== 'subject_keyword') {
+      res.status(400).json({ success: false, error: 'type 必须是 subject_keyword' });
       return;
     }
     const rule = verificationService.addRule(type, value.trim());
@@ -106,8 +106,14 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
     const disabledBuiltin: string[] = disabledRaw ? JSON.parse(disabledRaw) : [];
     const disabledSet = new Set(disabledBuiltin);
 
-    type MatchedRule = { id: string; type: 'subject_keyword' | 'sender_pattern' | 'extract_pattern'; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean };
+    type MatchedRule = { id: string; type: 'subject_keyword' | 'extract_pattern'; value: string; isBuiltin: boolean; enabled: boolean; matched: boolean };
     const results: MatchedRule[] = [];
+
+    const textToSearch = `${body}\n${subj}`;
+
+    // 获取保底提取规则的源码，用于仅对其做独立成行检查
+    const builtinRulesFull = getBuiltinRules();
+    const catchAllValue = builtinRulesFull.find(r => r.type === 'extract_pattern' && r.value === '(?<![A-Z0-9])(\\d{4,8})(?![A-Z0-9])')?.value;
 
     // 测试内置规则
     for (const r of builtinRules) {
@@ -115,13 +121,27 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
       let matched = false;
       if (!isDisabled) {
         try {
-          const re = new RegExp(r.value, 'i');
-          if (r.type === 'subject_keyword') matched = re.test(subj + ' ' + body);
-          else if (r.type === 'sender_pattern') matched = from ? re.test(from) : false;
-          else if (r.type === 'extract_pattern') matched = re.test(subj + ' ' + body);
+          if (r.type === 'extract_pattern') {
+            // 提取规则：仅对保底的纯数字规则做独立成行检查
+            const re = new RegExp(r.value, 'gi');
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(textToSearch)) !== null) {
+              if (r.value === catchAllValue) {
+                const before = textToSearch[m.index - 1];
+                if (before !== undefined && before !== '\n' && before !== '\r') continue;
+                const after = textToSearch[m.index + m[0].length];
+                if (after !== undefined && after !== '\n' && after !== '\r') continue;
+              }
+              matched = true;
+              break;
+            }
+          } else {
+            const re = new RegExp(r.value, 'i');
+            matched = re.test(textToSearch);
+          }
         } catch { /* 忽略无效正则 */ }
       }
-      results.push({ id: r.id, type: r.type, value: r.value, isBuiltin: true, enabled: !isDisabled, matched });
+      results.push({ id: r.id, type: r.type as 'subject_keyword' | 'extract_pattern', value: r.value, isBuiltin: true, enabled: !isDisabled, matched });
     }
 
     // 测试自定义规则
@@ -131,10 +151,9 @@ router.post('/verification-rules/test', (req: Request, res: Response) => {
         try {
           const re = new RegExp(r.value, 'i');
           if (r.type === 'subject_keyword') matched = re.test(subj + ' ' + body);
-          else if (r.type === 'sender_pattern') matched = from ? re.test(from) : false;
         } catch { /* 忽略无效正则 */ }
       }
-      results.push({ id: `custom_${r.id}`, type: r.type as 'subject_keyword' | 'sender_pattern', value: r.value, isBuiltin: false, enabled: !!r.enabled, matched });
+      results.push({ id: `custom_${r.id}`, type: 'subject_keyword', value: r.value, isBuiltin: false, enabled: !!r.enabled, matched });
     }
 
     // 运行完整的检测逻辑

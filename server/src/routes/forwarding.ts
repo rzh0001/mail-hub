@@ -13,15 +13,19 @@ router.get('/forwarding-rules', (_req: Request, res: Response) => {
 router.post('/forwarding-rules', (req: Request, res: Response) => {
   try {
     const { type, value, methodId } = req.body;
-    if (!type || !value) {
-      res.status(400).json({ success: false, error: '请提供 type 和 value' });
+    if (!type) {
+      res.status(400).json({ success: false, error: '请提供 type' });
       return;
     }
-    if (!['subject_keyword', 'sender_pattern'].includes(type)) {
-      res.status(400).json({ success: false, error: 'type 必须是 subject_keyword 或 sender_pattern' });
+    if (!['subject_keyword', 'sender_pattern', 'verification_code'].includes(type)) {
+      res.status(400).json({ success: false, error: 'type 必须是 subject_keyword、sender_pattern 或 verification_code' });
       return;
     }
-    const rule = forwardingService.addForwardingRule(type, value.trim(), methodId ? parseInt(methodId) : undefined);
+    if (type !== 'verification_code' && !value) {
+      res.status(400).json({ success: false, error: '请提供规则内容' });
+      return;
+    }
+    const rule = forwardingService.addForwardingRule(type, (value || '').trim(), methodId ? parseInt(methodId) : undefined);
     res.json({ success: true, data: rule });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || '添加转发规则失败' });
