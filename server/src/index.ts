@@ -9,6 +9,7 @@ import verificationRoutes from './routes/verification';
 import forwardingRoutes from './routes/forwarding';
 import forwardingMethodsRoutes from './routes/forwarding-methods';
 import trashRoutes from './routes/trash';
+import draftRoutes from './routes/drafts';
 import authRoutes from './routes/auth';
 import { startSyncScheduler, stopSyncScheduler } from './services/scheduler.service';
 
@@ -31,6 +32,7 @@ app.use('/api', verificationRoutes);
 app.use('/api', forwardingRoutes);
 app.use('/api', forwardingMethodsRoutes);
 app.use('/api', trashRoutes);
+app.use('/api', draftRoutes);
 app.use('/api', authRoutes);
 
 // 生产环境：提供前端静态文件

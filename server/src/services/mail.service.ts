@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { v4 as uuid } from 'uuid';
 import { getDatabase } from '../database';
+import { MAIL_PROVIDERS } from '../types';
 import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, ForwardLog, SendMailInput } from '../types';
 import { matchesTrashRule } from './trash.service';
 import { getSetting } from './settings.service';
@@ -160,7 +161,7 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
 
     const db = getDatabase();
 
-    // 查询已存在的 UID 集合
+    // 查询已存在的 UID 集合（按文件夹查询，避免不同文件夹同 UID 号误判）
     const existingUids = new Set(
       db.prepare('SELECT message_uid FROM mails WHERE account_id = ? AND folder = ?')
         .all(account.id, folder)
@@ -199,10 +200,11 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
           size: att.size || 0,
         }));
 
-      // 检查垃圾箱规则
+      // 检查垃圾箱规则 + 垃圾箱文件夹标记
       const subject = parsed.subject || '';
       const fromAddress = fromAddr?.address || '';
-      const isDeletedByRule = matchesTrashRule(subject, fromAddress) ? 1 : 0;
+      const isTrashFolder = folder === getTrashFolderForProvider(account.provider);
+      const isDeletedByRule = (isTrashFolder || matchesTrashRule(subject, fromAddress)) ? 1 : 0;
 
       const mail: MailRow = {
         id: uuid(),
@@ -393,27 +395,6 @@ async function syncDeleteToServer(accountId: string, folder: string, messageUids
   }
 }
 
-// 批量删除（本地 + IMAP）
-export function batchMarkDeleted(mailIds: string[]): void {
-  if (mailIds.length === 0) return;
-  const db = getDatabase();
-  const placeholders = mailIds.map(() => '?').join(',');
-  db.prepare(`UPDATE mails SET is_deleted = 1 WHERE id IN (${placeholders})`).run(...mailIds);
-
-  // 按账户+文件夹分组同步到IMAP
-  const mails = db.prepare(`SELECT account_id, folder, message_uid FROM mails WHERE id IN (${placeholders})`).all(...mailIds) as any[];
-  const grouped: Record<string, { folder: string; uids: number[] }> = {};
-  for (const m of mails) {
-    const key = `${m.account_id}|${m.folder}`;
-    if (!grouped[key]) grouped[key] = { folder: m.folder, uids: [] };
-    grouped[key].uids.push(m.message_uid);
-  }
-  for (const [key, val] of Object.entries(grouped)) {
-    const accountId = key.split('|')[0];
-    syncDeleteToServer(accountId, val.folder, val.uids);
-  }
-}
-
 // 通过IMAP添加或移除标记
 async function syncServerFlags(accountId: string, folder: string, messageUids: number[], flag: string, add: boolean): Promise<void> {
   if (messageUids.length === 0) return;
@@ -456,20 +437,140 @@ export function markFlagged(mailId: string, isFlagged: boolean): void {
   syncServerFlags(mail.account_id, mail.folder, [mail.message_uid], '\\Flagged', isFlagged);
 }
 
+// 获取账户的垃圾箱文件夹名
+function getTrashFolder(accountId: string): string {
+  const db = getDatabase();
+  const account = db.prepare('SELECT provider FROM accounts WHERE id = ?').get(accountId) as { provider: string } | undefined;
+  return getTrashFolderForProvider(account?.provider || '');
+}
+
+// 根据提供商获取垃圾箱文件夹名
+function getTrashFolderForProvider(provider: string): string {
+  if (provider && MAIL_PROVIDERS[provider]) {
+    return MAIL_PROVIDERS[provider].trashFolder;
+  }
+  return '已删除';
+}
+
+// 通过IMAP将邮件移到垃圾箱（MOVE 命令）
+async function syncMoveToTrash(accountId: string, folder: string, messageUids: number[]): Promise<void> {
+  if (messageUids.length === 0) return;
+  const db = getDatabase();
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as AccountRow | undefined;
+  if (!account) return;
+
+  const trashFolder = getTrashFolder(accountId);
+
+  // 如果邮件已在垃圾箱文件夹，跳过
+  if (folder === trashFolder) return;
+
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: account.imap_port,
+    secure: account.imap_secure === 1,
+    auth: { user: account.email, pass: account.auth_code },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    await client.mailboxOpen(folder);
+    // 尝试 MOVE 到垃圾箱（如果服务器支持）
+    try {
+      const uidSeq = messageUids.sort((a, b) => a - b).join(',');
+      await client.messageMove({ uid: uidSeq }, trashFolder);
+    } catch {
+      // 降级：标记为已删除
+      for (const uid of messageUids) {
+        try { await client.messageFlagsAdd({ uid }, ['\\Deleted']); } catch { /* ignore */ }
+      }
+    }
+    await client.logout();
+  } catch {
+    try { await client.logout(); } catch { /* ignore */ }
+  }
+}
+
 // 标记删除（本地 + IMAP）
 export function markDeleted(mailId: string): void {
   const db = getDatabase();
   const mail = db.prepare('SELECT * FROM mails WHERE id = ?').get(mailId) as any;
   if (!mail) return;
   db.prepare('UPDATE mails SET is_deleted = 1 WHERE id = ?').run(mailId);
-  syncDeleteToServer(mail.account_id, mail.folder, [mail.message_uid]);
+  // 异步 IMAP 操作：尝试 MOVE 到垃圾箱（保持服务端一致，不阻塞响应）
+  syncMoveToTrash(mail.account_id, mail.folder, [mail.message_uid]).catch(err => {
+    console.error(`[Delete] IMAP MOVE 失败 (${mailId}):`, err);
+  });
+}
+
+// 批量标记删除（本地 + IMAP）
+export function batchMarkDeleted(mailIds: string[]): void {
+  if (mailIds.length === 0) return;
+  const db = getDatabase();
+  const placeholders = mailIds.map(() => '?').join(',');
+  const mails = db.prepare(`SELECT * FROM mails WHERE id IN (${placeholders})`).all(...mailIds) as any[];
+
+  for (const mail of mails) {
+    db.prepare('UPDATE mails SET is_deleted = 1 WHERE id = ?').run(mail.id);
+    syncMoveToTrash(mail.account_id, mail.folder, [mail.message_uid]).catch(err => {
+      console.error(`[BatchDelete] IMAP MOVE 失败 (${mail.id}):`, err);
+    });
+  }
 }
 
 // 获取邮件列表
 export function getMailList(accountId?: string, folder?: string, page: number = 1, pageSize: number = 20, query?: string): { mails: MailSummary[], total: number } {
   const db = getDatabase();
 
-  let where = folder === '已删除' ? 'WHERE 1=1' : 'WHERE m.is_deleted = 0';
+  // 草稿箱特殊处理：从 drafts 表读取
+  if (folder === '草稿箱') {
+    let draftWhere = 'WHERE 1=1';
+    const draftParams: any[] = [];
+    if (accountId) {
+      draftWhere += ' AND d.account_id = ?';
+      draftParams.push(accountId);
+    }
+    if (query && query.trim()) {
+      const like = `%${query.trim()}%`;
+      draftWhere += ' AND (d.subject LIKE ?)';
+      draftParams.push(like);
+    }
+    const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM drafts d ${draftWhere}`).get(...draftParams) as any;
+    const total = countRow.cnt;
+    const offset = (page - 1) * pageSize;
+    draftParams.push(pageSize, offset);
+
+    const draftRows = db.prepare(`
+      SELECT d.*, a.name as account_name, a.email as account_email, a.avatar_color, a.avatar_name
+      FROM drafts d
+      LEFT JOIN accounts a ON d.account_id = a.id
+      ${draftWhere}
+      ORDER BY d.updated_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...draftParams) as any[];
+
+    const mails: MailSummary[] = draftRows.map(r => ({
+      id: r.id,
+      accountId: r.account_id,
+      accountName: r.account_name || '',
+      accountEmail: r.account_email || '',
+      avatarColor: r.avatar_color || '',
+      avatarName: r.avatar_name || '',
+      folder: '草稿箱',
+      fromName: '',
+      fromAddress: r.account_email || '',
+      subject: r.subject || '(无主题)',
+      receivedAt: r.updated_at,
+      isRead: true,
+      isFlagged: false,
+      hasAttachments: false,
+      verificationCode: '',
+    }));
+    return { mails, total };
+  }
+
+  // 已删除/垃圾箱：按 is_deleted 查询
+  let where = (folder === '已删除' || folder === '垃圾箱') ? 'WHERE m.is_deleted = 1' : 'WHERE m.is_deleted = 0';
   const params: any[] = [];
 
   if (accountId) {

@@ -131,6 +131,11 @@ export default function Inbox() {
 
   // 选中邮件
   const handleSelect = (id: string) => {
+    // 草稿箱：点击跳转到写邮件页面编辑
+    if (folder === '草稿箱') {
+      navigate(`/compose/draft/${id}`);
+      return;
+    }
     setSearchParams(prev => {
       prev.set('selected', id);
       return prev;
@@ -319,6 +324,16 @@ export default function Inbox() {
     return new Date(dateStr).toLocaleString('zh-CN', {
       year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
+  };
+
+  // 复制地址到剪贴板
+  const copyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      toast('已复制地址: ' + address, 'success');
+    } catch {
+      toast('复制失败', 'error');
+    }
   };
 
   const formatSize = (bytes: number) => {
@@ -685,21 +700,44 @@ export default function Inbox() {
             <div className="max-w-3xl px-6 py-5">
               <h1 className="text-xl font-semibold text-gray-900 mb-4">{detail.subject || '(无主题)'}</h1>
 
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2 mb-5 text-sm">
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2 mb-5 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="text-gray-400 w-16 flex-shrink-0">发件人</span>
                   <span className="font-medium text-gray-800">
                     {detail.fromName ? `${detail.fromName} <${detail.fromAddress}>` : detail.fromAddress}
                   </span>
+                  <button onClick={() => copyAddress(detail.fromAddress)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                    title="复制地址">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="text-gray-400 w-16 flex-shrink-0">收件人</span>
                   <span className="text-gray-700">{detail.toList.join(', ') || '未指定'}</span>
+                  {detail.toList.length > 0 && (
+                    <button onClick={() => copyAddress(detail.toList.join(', '))}
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+                      title="复制地址">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
                 {detail.ccList.length > 0 && (
                   <div className="flex items-start gap-2">
                     <span className="text-gray-400 w-16 flex-shrink-0">抄送</span>
                     <span className="text-gray-700">{detail.ccList.join(', ')}</span>
+                    <button onClick={() => copyAddress(detail.ccList.join(', '))}
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+                      title="复制地址">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    </button>
                   </div>
                 )}
                 <div className="flex items-center gap-2">

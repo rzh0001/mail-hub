@@ -190,6 +190,18 @@ export interface ForwardingMethod {
   created_at: string;
 }
 
+// 草稿
+export interface Draft {
+  id: string;
+  accountId: string;
+  to: string;
+  cc: string;
+  subject: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // 垃圾箱规则
 export interface TrashRule {
   id: number;

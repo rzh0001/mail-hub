@@ -112,6 +112,18 @@ function initTables(): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS drafts (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      to_list TEXT NOT NULL DEFAULT '',
+      cc_list TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL DEFAULT '',
+      body_html TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS mail_forward_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       mail_id TEXT NOT NULL,

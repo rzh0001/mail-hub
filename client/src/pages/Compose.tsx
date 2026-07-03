@@ -2,11 +2,9 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { getAccounts, sendMail, getMail } from '../services/api';
+import { getAccounts, sendMail, getMail, saveDraft as saveDraftApi, deleteDraft as deleteDraftApi, getDraft } from '../services/api';
 import { useUI } from '../contexts/UIContext';
 import type { MailAccount, SendMailInput, MailDetail } from '../types';
-
-const DRAFT_KEY = 'mailhub_compose_draft';
 
 const QUILL_MODULES = {
   toolbar: [
@@ -54,15 +52,19 @@ function formatOriginalMailAsHtml(mail: MailDetail): string {
 
 export default function Compose() {
   const { toast } = useUI();
-  const { replyToId } = useParams<{ replyToId: string }>();
+  const { replyToId, draftId } = useParams<{ replyToId: string; draftId: string }>();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(false);
   const [error, setError] = useState('');
   const [replyMail, setReplyMail] = useState<MailDetail | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout>>();
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const isDraftEdit = !!draftId;
+  const isReply = !!replyToId && !draftId;
 
   const [form, setForm] = useState<{
     accountId: string;
@@ -88,9 +90,30 @@ export default function Compose() {
     }).catch(() => {});
   }, []);
 
+  // 草稿编辑模式：加载草稿
+  useEffect(() => {
+    if (draftId) {
+      setLoadingDraft(true);
+      getDraft(draftId).then(draft => {
+        setCurrentDraftId(draft.id);
+        setForm({
+          accountId: draft.accountId,
+          to: draft.to,
+          cc: draft.cc,
+          subject: draft.subject,
+          body: draft.body,
+        });
+        setLastSavedAt(new Date(draft.updatedAt).toLocaleString('zh-CN'));
+      }).catch(() => {
+        toast('加载草稿失败', 'error');
+        navigate('/inbox');
+      }).finally(() => setLoadingDraft(false));
+    }
+  }, [draftId, navigate, toast]);
+
   // 回复模式：加载原邮件
   useEffect(() => {
-    if (replyToId) {
+    if (replyToId && !draftId) {
       getMail(replyToId).then(mail => {
         setReplyMail(mail);
         setForm(prev => ({
@@ -102,43 +125,31 @@ export default function Compose() {
         }));
       }).catch(() => {});
     }
-  }, [replyToId]);
+  }, [replyToId, draftId]);
 
-  // 加载本地草稿（非回复模式下）
-  useEffect(() => {
-    if (replyToId) return;
+  // 自动保存草稿到服务端
+  const saveDraft = useCallback(async (data: typeof form, silent = true) => {
+    if (isReply) return; // 回复模式不保存草稿
     try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const draft = JSON.parse(raw);
-        setForm(prev => ({
-          ...prev,
-          accountId: draft.accountId || prev.accountId,
-          to: draft.to || '',
-          cc: draft.cc || '',
-          subject: draft.subject || '',
-          body: draft.body || '',
-        }));
-        setLastSavedAt(draft.savedAt ? new Date(draft.savedAt).toLocaleString('zh-CN') : null);
-      }
-    } catch { /* ignore */ }
-  }, [replyToId]);
-
-  // 自动保存草稿
-  const saveDraft = useCallback((data: typeof form, silent = true) => {
-    if (replyToId) return; // 回复模式不自动保存为草稿
-    try {
-      const payload = { ...data, savedAt: new Date().toISOString() };
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+      const result = await saveDraftApi({
+        id: currentDraftId || undefined,
+        accountId: data.accountId,
+        to: data.to,
+        cc: data.cc,
+        subject: data.subject,
+        body: data.body,
+      });
+      setCurrentDraftId(result.id);
       if (!silent) toast('草稿已保存', 'success');
       setLastSavedAt(new Date().toLocaleString('zh-CN'));
     } catch {
       if (!silent) toast('草稿保存失败', 'error');
     }
-  }, [replyToId, toast]);
+  }, [currentDraftId, isReply, toast]);
 
+  // 自动保存 debounce (3秒)
   useEffect(() => {
-    if (replyToId) return;
+    if (isReply) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       saveDraft(form, true);
@@ -146,10 +157,13 @@ export default function Compose() {
     return () => {
       if (draftTimer.current) clearTimeout(draftTimer.current);
     };
-  }, [form, replyToId, saveDraft]);
+  }, [form, isReply, saveDraft]);
 
-  const clearDraft = () => {
-    localStorage.removeItem(DRAFT_KEY);
+  const handleClearDraft = async () => {
+    if (currentDraftId) {
+      try { await deleteDraftApi(currentDraftId); } catch { /* ignore */ }
+      setCurrentDraftId(null);
+    }
     setLastSavedAt(null);
   };
 
@@ -181,7 +195,7 @@ export default function Compose() {
       };
 
       await sendMail(input);
-      clearDraft();
+      await handleClearDraft();
       toast('邮件发送成功', 'success');
       navigate('/inbox');
     } catch (err: any) {
@@ -193,18 +207,18 @@ export default function Compose() {
 
   const handleManualSaveDraft = async () => {
     setSavingDraft(true);
-    saveDraft(form, false);
+    await saveDraft(form, false);
     setSavingDraft(false);
   };
 
-  const handleDiscard = () => {
-    if (window.confirm('确定要放弃这封邮件吗？未保存的草稿将丢失。')) {
-      clearDraft();
+  const handleDiscard = async () => {
+    if (window.confirm('确定要放弃这封邮件吗？草稿将被删除。')) {
+      await handleClearDraft();
       navigate('/inbox');
     }
   };
 
-  const toInputId = accounts.find(a => a.id === form.accountId);
+  const isFormDisabled = sending || loadingDraft;
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -220,8 +234,11 @@ export default function Compose() {
             </svg>
           </button>
           <h1 className="text-lg font-semibold text-gray-800">
-            {replyToId ? '回复邮件' : '写邮件'}
+            {isDraftEdit ? '编辑草稿' : isReply ? '回复邮件' : '写邮件'}
           </h1>
+          {loadingDraft && (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+          )}
           {lastSavedAt && (
             <span className="hidden sm:inline text-xs text-gray-400">
               草稿已保存 {lastSavedAt}
@@ -231,20 +248,21 @@ export default function Compose() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleManualSaveDraft}
-            disabled={savingDraft || !!replyToId}
+            disabled={savingDraft || isReply || isFormDisabled}
             className="px-3 py-1.5 text-xs text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             {savingDraft ? '保存中...' : '保存草稿'}
           </button>
           <button
             onClick={handleDiscard}
-            className="px-3 py-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+            disabled={isFormDisabled}
+            className="px-3 py-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
           >
             丢弃
           </button>
           <button
             onClick={handleSend}
-            disabled={sending}
+            disabled={sending || isFormDisabled}
             className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50"
           >
             {sending ? '发送中...' : '发送'}
@@ -268,7 +286,8 @@ export default function Compose() {
               <select
                 value={form.accountId}
                 onChange={e => setForm(prev => ({ ...prev, accountId: e.target.value }))}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                disabled={isFormDisabled}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white disabled:bg-gray-50"
               >
                 {accounts.length === 0 && <option value="">请先添加邮箱账户</option>}
                 {accounts.map(a => (
@@ -285,7 +304,8 @@ export default function Compose() {
                 placeholder="多个收件人用逗号或分号分隔"
                 value={form.to}
                 onChange={e => setForm(prev => ({ ...prev, to: e.target.value }))}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={isFormDisabled}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
               />
             </div>
 
@@ -297,7 +317,8 @@ export default function Compose() {
                 placeholder="可选，多个用逗号分隔"
                 value={form.cc}
                 onChange={e => setForm(prev => ({ ...prev, cc: e.target.value }))}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={isFormDisabled}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
               />
             </div>
 
@@ -309,7 +330,8 @@ export default function Compose() {
                 placeholder="邮件主题"
                 value={form.subject}
                 onChange={e => setForm(prev => ({ ...prev, subject: e.target.value }))}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={isFormDisabled}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
               />
             </div>
 
@@ -325,6 +347,7 @@ export default function Compose() {
                   formats={QUILL_FORMATS}
                   placeholder="在此撰写邮件内容..."
                   className="compose-editor"
+                  readOnly={isFormDisabled}
                 />
               </div>
             </div>

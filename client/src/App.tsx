@@ -25,6 +25,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/inbox" replace />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/compose" element={<Compose />} />
+            <Route path="/compose/draft/:draftId" element={<Compose />} />
             <Route path="/compose/:replyToId" element={<Compose />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/settings" element={<Settings />} />

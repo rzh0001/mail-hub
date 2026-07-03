@@ -1,4 +1,4 @@
-import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, UpdateAccountInput, SendMailInput, AccountConfig, ImportResult, SettingsMap, VerificationRule, BuiltinVerificationRule, ForwardingRule, ForwardingMethod, TrashRule } from '../types';
+import type { ApiResponse, MailAccount, MailProvider, MailSummary, MailDetail, MailListResponse, CreateAccountInput, UpdateAccountInput, SendMailInput, AccountConfig, ImportResult, SettingsMap, VerificationRule, BuiltinVerificationRule, ForwardingRule, ForwardingMethod, Draft, TrashRule } from '../types';
 
 const BASE = '/api';
 
@@ -238,6 +238,31 @@ export function deleteForwardingRule(id: number): Promise<void> {
 // 切换转发规则启用状态
 export function toggleForwardingRule(id: number): Promise<ForwardingRule> {
   return request(`/forwarding-rules/${id}/toggle`, { method: 'PUT' });
+}
+
+// ====== 草稿 ======
+
+// 获取所有草稿
+export function getDrafts(): Promise<Draft[]> {
+  return request('/drafts');
+}
+
+// 获取单个草稿
+export function getDraft(id: string): Promise<Draft> {
+  return request(`/drafts/${id}`);
+}
+
+// 保存草稿（创建或更新）
+export function saveDraft(data: { id?: string; accountId: string; to: string; cc: string; subject: string; body: string }): Promise<Draft> {
+  return request('/drafts', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// 删除草稿
+export function deleteDraft(id: string): Promise<void> {
+  return request(`/drafts/${id}`, { method: 'DELETE' });
 }
 
 // ====== 垃圾箱规则 ======

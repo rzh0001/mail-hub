@@ -863,7 +863,7 @@ export default function Settings() {
                           <code className="text-xs text-gray-700 flex-1 truncate font-mono">{rule.value}</code>
                           <button onClick={() => handleToggleRule(rule.id)}
                             className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                            {rule.enabled ? '启用' : '停用'}
+                            {rule.enabled ? '已启用' : '已关闭'}
                           </button>
                           <button onClick={() => handleDeleteRule(rule.id)}
                             className="text-xs px-1.5 py-0.5 text-red-300 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0">删除</button>
@@ -1139,7 +1139,7 @@ export default function Settings() {
                             </select>
                             <button onClick={() => handleToggleForwardingRule(rule.id)}
                               className={`text-xs px-1.5 py-0.5 rounded ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                              {rule.enabled ? '停用' : '启用'}
+                              {rule.enabled ? '已启用' : '已关闭'}
                             </button>
                             <button onClick={() => handleDeleteForwardingRule(rule.id)}
                               className="text-xs text-red-400 hover:text-red-600 flex-shrink-0">删除</button>
@@ -1243,7 +1243,7 @@ export default function Settings() {
                         <code className="text-xs text-gray-700 flex-1 truncate font-mono">{rule.value}</code>
                         <button onClick={() => handleToggleTrashRule(rule.id)}
                           className={`text-xs px-1.5 py-0.5 rounded ${rule.enabled ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
-                          {rule.enabled ? '启用' : '停用'}
+                          {rule.enabled ? '已启用' : '已关闭'}
                         </button>
                         <button onClick={() => handleDeleteTrashRule(rule.id)}
                           className="text-xs text-red-400 hover:text-red-600 flex-shrink-0">删除</button>
