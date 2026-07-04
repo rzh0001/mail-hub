@@ -5,6 +5,7 @@
 ## ✨ 功能特性
 
 - **多邮箱聚合管理** — 同时管理 163、QQ、Gmail、Outlook 等多个邮箱账户（IMAP/SMTP）
+- **账号注册** — 分配未注册邮箱，自动接收验证码，支持多网站注册管理
 - **邮件收发** — 统一的收件箱视图，支持基础邮件操作
 - **邮件搜索** — 按主题、发件人搜索邮件
 - **邮件转发与通知** — 自动转发邮件到指定地址，支持 Server 酱、飞书、企业微信等推送通知
@@ -14,8 +15,8 @@
 
 | 页面 | 截图 |
 |------|------|
-| 📧 **登录界面** — 统一的邮件列表视图，支持搜索筛选 | ![登录界面](./screenshots/login.png) |
 | 📧 **收件箱** — 统一的邮件列表视图，支持搜索筛选 | ![收件箱](./screenshots/inbox.png) |
+| 📧 **账号注册** — 分配邮箱、自动收验证码 | ![账号注册](./screenshots/register.png) |
 | 👤 **账户管理** — 多邮箱账户的统一管理与筛选 | ![账户管理](./screenshots/accounts.png) |
 | ⚙️ **设置** — 邮件转发、通知推送等全局配置 | ![设置页面](./screenshots/settings.png) |
 
@@ -35,7 +36,7 @@ mail-hub/
 ├── client/                # React 前端
 │   └── src/
 │       ├── components/    # 通用组件
-│       ├── pages/         # 页面组件（收件箱、邮箱管理、设置等）
+│       ├── pages/         # 页面组件（收件箱、邮箱管理、设置、账号注册等）
 │       ├── services/      # API 服务层
 │       ├── contexts/      # React Context
 │       ├── hooks/         # 自定义 Hooks
@@ -43,7 +44,7 @@ mail-hub/
 ├── server/                # Express 后端
 │   └── src/
 │       ├── routes/        # API 路由
-│       ├── services/      # 业务逻辑（邮件收发、转发等）
+│       ├── services/      # 业务逻辑（邮件收发、转发、注册管理等）
 │       └── types/         # TypeScript 类型定义
 └── package.json           # 根项目配置
 ```
@@ -155,6 +156,29 @@ volumes:
 5. 点击 **确认** 即可
 
 部署完成后通过 `http://你的服务器IP:3001` 访问，默认密码 `123456`。
+
+## 📧 已支持的邮箱提供商
+
+### ✅ 内置 IMAP/SMTP 配置（开箱即用）
+
+添加邮箱时选择提供商，自动填入服务器配置：
+
+| 提供商 | 备注 |
+|--------|------|
+| **163邮箱** | `imap.163.com` / `smtp.163.com`，需开启 IMAP/SMTP 并使用授权码 |
+| **QQ邮箱** | `imap.qq.com` / `smtp.qq.com`，需开启 IMAP/SMTP 并使用授权码 |
+| **Gmail** | `imap.gmail.com` / `smtp.gmail.com`，需使用应用专用密码 |
+| **Outlook** | `outlook.office365.com` / `smtp.office365.com`，支持 Office 365 / 个人版 |
+
+### 🔧 通用 IMAP/SMTP（手动配置）
+
+任何支持 IMAP/SMTP 的邮箱均可通过手动填写服务器地址接入，不受限于预设列表。
+
+### ⏭️ 账号注册自动跳过域名
+
+在账号注册功能中，以下邮件提供商域名会被自动跳过（不视为待注册的"网站"）：
+
+`163.com` · `126.com` · `qq.com` · `foxmail.com` · `gmail.com` · `outlook.com` · `hotmail.com` · `live.com` · `yahoo.com` · `sina.com` · `sohu.com` · `aliyun.com` · `icloud.com` · `proton.me` · `pm.me`
 
 ## ⚖️ 许可协议
 
