@@ -7,6 +7,7 @@ import { MAIL_PROVIDERS } from '../types';
 import type { AccountRow, MailRow, MailSummary, MailDetail, Attachment, ForwardLog, SendMailInput } from '../types';
 import { matchesTrashRule } from './trash.service';
 import { getSetting } from './settings.service';
+import { processMailFromSender } from './registration.service';
 
 // ---------- 验证码检测（内置规则 + 数据库自定义规则）----------
 // 内置规则源码（用于显示 & 编译为正则）
@@ -236,6 +237,11 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
       `).run(mail);
       if (result.changes === 0) continue; // 并发冲突，另一个线程已经插入了这封邮件
       mailIds.push(mail.id);
+
+      // 注册感知：自动提取发件人域名，建立网站和注册关系
+      try {
+        processMailFromSender(account.id, fromAddress);
+      } catch { /* 注册感知失败不影响同步 */ }
 
       // 垃圾箱规则匹配 → 同步删除到 IMAP 服务器
       if (isDeletedByRule) {
