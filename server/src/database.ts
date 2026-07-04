@@ -131,6 +131,23 @@ function initTables(): void {
       method_name TEXT NOT NULL DEFAULT '',
       forwarded_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS websites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS email_registries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      UNIQUE(account_id, website_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_email_registries_account ON email_registries(account_id);
+    CREATE INDEX IF NOT EXISTS idx_email_registries_website ON email_registries(website_id);
   `);
   try { database.exec("CREATE INDEX IF NOT EXISTS idx_mail_forward_log_mail_id ON mail_forward_log(mail_id)"); } catch {}
 
