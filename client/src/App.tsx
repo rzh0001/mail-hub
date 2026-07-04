@@ -7,6 +7,7 @@ import LockScreen from './components/LockScreen';
 import Inbox from './pages/Inbox';
 import Compose from './pages/Compose';
 import Accounts from './pages/Accounts';
+import Register from './pages/Register';
 import Settings from './pages/Settings';
 
 function ActivityWatcher() {
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/compose" element={<Compose />} />
             <Route path="/compose/draft/:draftId" element={<Compose />} />
             <Route path="/compose/:replyToId" element={<Compose />} />
+            <Route path="/register" element={<Register />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

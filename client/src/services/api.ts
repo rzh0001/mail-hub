@@ -341,6 +341,89 @@ export function setDefaultForwardingMethod(id: number): Promise<ForwardingMethod
   return request(`/forwarding-methods/${id}/default`, { method: 'POST' });
 }
 
+// ====== 账号注册（网站管理 + 随机分配） ======
+
+export interface Website {
+  id: number;
+  domain: string;
+  registeredCount: number;
+  totalAccounts: number;
+  createdAt: string;
+}
+
+export interface AssignedResult {
+  accountId: string;
+  email: string;
+  accountName: string;
+  domain: string;
+  registeredCount: number;
+  totalAccounts: number;
+}
+
+export interface WebsiteMail {
+  id: string;
+  subject: string;
+  fromName: string;
+  fromAddress: string;
+  receivedAt: string;
+  verificationCode: string;
+  bodyText: string;
+  bodyHtml: string;
+}
+
+/** 获取所有网站 */
+export function getWebsites(): Promise<Website[]> {
+  return request('/websites');
+}
+
+/** 添加网站域名 */
+export function addWebsite(domain: string): Promise<Website> {
+  return request('/websites', {
+    method: 'POST',
+    body: JSON.stringify({ domain }),
+  });
+}
+
+/** 删除网站 */
+export function deleteWebsite(id: number): Promise<void> {
+  return request(`/websites/${id}`, { method: 'DELETE' });
+}
+
+/** 获取未注册某网站的邮箱列表 */
+export function getUnregisteredAccounts(websiteId: number): Promise<Array<{ id: string; email: string; name: string }>> {
+  return request(`/websites/${websiteId}/unregistered`);
+}
+
+/** 随机分配一个未注册的邮箱 */
+export function assignEmail(websiteId: number): Promise<AssignedResult | null> {
+  return request(`/websites/${websiteId}/assign`, { method: 'POST' });
+}
+
+/** 手动注册：将指定邮箱注册到某网站 */
+export function registerEmail(websiteId: number, accountId: string): Promise<void> {
+  return request(`/websites/${websiteId}/register`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId }),
+  });
+}
+
+/** 取消注册 */
+export function unregisterEmail(websiteId: number, accountId: string): Promise<void> {
+  return request(`/websites/${websiteId}/register/${accountId}`, { method: 'DELETE' });
+}
+
+/** 获取某网站的注册列表 */
+export function getRegistries(websiteId: number): Promise<Array<{ id: number; accountId: string; accountEmail: string; accountName: string; websiteId: number; createdAt: string }>> {
+  return request(`/websites/${websiteId}/registries`);
+}
+
+/** 获取某网站发给某邮箱的最新邮件 */
+export function getWebsiteMails(websiteId: number, accountId: string, since?: string): Promise<WebsiteMail[]> {
+  const params = new URLSearchParams({ accountId });
+  if (since) params.set('since', since);
+  return request(`/websites/${websiteId}/mails?${params.toString()}`);
+}
+
 // ====== Server酱 微信推送 ======
 
 // 测试 Server酱 推送连通性
