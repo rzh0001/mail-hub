@@ -11,6 +11,8 @@ import forwardingMethodsRoutes from './routes/forwarding-methods';
 import trashRoutes from './routes/trash';
 import draftRoutes from './routes/drafts';
 import authRoutes from './routes/auth';
+import registrationRoutes from './routes/registration';
+import { scanExistingMails, normalizeExistingWebsites } from './services/registration.service';
 import { startSyncScheduler, stopSyncScheduler } from './services/scheduler.service';
 
 const app = express();
@@ -34,6 +36,7 @@ app.use('/api', forwardingMethodsRoutes);
 app.use('/api', trashRoutes);
 app.use('/api', draftRoutes);
 app.use('/api', authRoutes);
+app.use('/api', registrationRoutes);
 
 // 生产环境：提供前端静态文件
 if (process.env.NODE_ENV === 'production') {
@@ -49,6 +52,20 @@ app.listen(PORT, () => {
   console.log(`[MailHub] 服务已启动: http://localhost:${PORT}`);
   console.log(`[MailHub] API 地址: http://localhost:${PORT}/api`);
   startSyncScheduler();
+
+  // 迁移历史脏域名数据（归一化为一级域名）
+  try {
+    normalizeExistingWebsites();
+  } catch (err) {
+    console.error('[Registration] 域名迁移失败:', err);
+  }
+
+  // 初始扫描现有邮件，建立网站列表和注册关系
+  try {
+    scanExistingMails();
+  } catch (err) {
+    console.error('[Registration] 初始扫描失败:', err);
+  }
 });
 
 // 优雅关闭
