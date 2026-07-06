@@ -15,10 +15,10 @@
 
 | 页面 | 截图 |
 |------|------|
-| 📧 **收件箱** — 统一的邮件列表视图，支持搜索筛选 | ![收件箱](./screenshots/inbox.png) |
-| 📧 **账号注册** — 分配邮箱、自动收验证码 | ![账号注册](./screenshots/register.png) |
-| 👤 **账户管理** — 多邮箱账户的统一管理与筛选 | ![账户管理](./screenshots/accounts.png) |
-| ⚙️ **设置** — 邮件转发、通知推送等全局配置 | ![设置页面](./screenshots/settings.png) |
+| 📧 **收件箱** — 统一的邮件列表视图，支持搜索筛选 | ![收件箱](https://raw.githubusercontent.com/rzh0001/mail-hub/main/screenshots/inbox.png) |
+| 📧 **账号注册** — 分配邮箱、自动收验证码 | ![账号注册](https://raw.githubusercontent.com/rzh0001/mail-hub/main/screenshots/register.png) |
+| 👤 **账户管理** — 多邮箱账户的统一管理与筛选 | ![账户管理](https://raw.githubusercontent.com/rzh0001/mail-hub/main/screenshots/accounts.png) |
+| ⚙️ **设置** — 邮件转发、通知推送等全局配置 | ![设置页面](https://raw.githubusercontent.com/rzh0001/mail-hub/main/screenshots/settings.png) |
 
 ## 🛠️ 技术栈
 
@@ -104,59 +104,6 @@ docker compose up -d
 
 启动后访问 `http://localhost:3001`，默认密码 `123456`。
 
----
-
-#### 🖥️ 部署到 1Panel
-
-1Panel 是一款流行的 Linux 服务器管理面板，支持通过可视化界面管理 Docker 容器。
-
-**方法一：编排（Compose）部署**
-
-1. 登录 1Panel 管理面板
-2. 进入 **容器** → **编排**
-3. 点击 **创建编排**
-4. 名称填写 `mail-hub`
-5. 在编辑框中粘贴以下内容：
-
-```yaml
-services:
-  mail-hub:
-    image: ruanzh/mail-hub:latest
-    container_name: mail-hub
-    ports:
-      - "3001:3001"
-    volumes:
-      - mail-hub-data:/app/server/data
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-    restart: unless-stopped
-
-volumes:
-  mail-hub-data:
-```
-
-6. 点击 **确认**，1Panel 会自动拉取镜像并启动容器
-
-**方法二：容器部署**
-
-1. 登录 1Panel 管理面板
-2. 进入 **容器** → **容器**
-3. 点击 **创建容器**
-4. 配置以下参数：
-
-| 参数 | 值 |
-|---|---|
-| 镜像 | `ruanzh/mail-hub:latest` |
-| 容器名称 | `mail-hub` |
-| 端口映射 | `3001:3001` |
-| 存储卷 | 创建卷 `mail-hub-data`，挂载到 `/app/server/data` |
-| 重启策略 | `unless-stopped` |
-
-5. 点击 **确认** 即可
-
-部署完成后通过 `http://你的服务器IP:3001` 访问，默认密码 `123456`。
-
 ## 📧 已支持的邮箱提供商
 
 ### ✅ 内置 IMAP/SMTP 配置（开箱即用）
@@ -174,27 +121,12 @@ volumes:
 
 任何支持 IMAP/SMTP 的邮箱均可通过手动填写服务器地址接入，不受限于预设列表。
 
-### ⏭️ 账号注册自动跳过域名
-
-在账号注册功能中，以下邮件提供商域名会被自动跳过（不视为待注册的"网站"）：
-
-`163.com` · `126.com` · `qq.com` · `foxmail.com` · `gmail.com` · `outlook.com` · `hotmail.com` · `live.com` · `yahoo.com` · `sina.com` · `sohu.com` · `aliyun.com` · `icloud.com` · `proton.me` · `pm.me`
-
 ## ⚖️ 许可协议
 
 本项目使用 **Mail Hub Non-Commercial License** — 仅限非商业用途。
 
 - ✅ **允许**：个人学习、研究、教育、非营利项目使用
 - ❌ **禁止**：任何商业用途（企业部署、商业产品销售、付费服务等）
-- 📧 **商用授权**：请联系 [替换为实际联系邮箱]
+- 📧 **商用授权**：请联系 rzh0001@qq.com
 
-详见 [LICENSE](./LICENSE) 文件。
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request。提交前请确保代码通过类型检查：
-
-```bash
-cd client && npx tsc --noEmit
-cd ../server && npx tsc --noEmit
-```
+详见 [LICENSE](https://github.com/rzh0001/mail-hub/blob/main/LICENSE) 文件。
