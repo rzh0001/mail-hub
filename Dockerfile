@@ -36,6 +36,14 @@ RUN npm ci --omit=dev -w server
 
 # ============ 阶段5：运行 ============
 FROM node:20-alpine
+
+# OCI 镜像元数据
+LABEL org.opencontainers.image.title="Mail Hub"
+LABEL org.opencontainers.image.description="邮箱聚合管理系统 — 统一管理多个邮箱账户，支持收件、发件、邮件转发与通知推送"
+LABEL org.opencontainers.image.url="https://github.com/rzh0001/mail"
+LABEL org.opencontainers.image.source="https://github.com/rzh0001/mail"
+LABEL org.opencontainers.image.licenses="Mail Hub Non-Commercial License"
+
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
