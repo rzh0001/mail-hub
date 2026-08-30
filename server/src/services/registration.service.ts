@@ -278,7 +278,7 @@ export function randomAssign(websiteId: number): AssignedResult | null {
 
   // 获取网站域名
   const website = db.prepare('SELECT * FROM websites WHERE id = ?').get(websiteId) as WebsiteRow | undefined;
-  if (!website) throw new Error('网站不存在');
+  if (!website) return null; // 网站不存在，返回 null 而不是抛出错误
 
   // 获取未注册该网站的账户
   const unregistered = getUnregisteredAccounts(websiteId);
@@ -327,9 +327,13 @@ export function processMailFromSender(accountId: string, fromAddress: string): v
   }
 
   // 建立注册关系（INSERT OR IGNORE 避免重复）
-  const now = new Date().toISOString();
-  db.prepare('INSERT OR IGNORE INTO email_registries (account_id, website_id, created_at) VALUES (?, ?, ?)')
-    .run(accountId, website.id, now);
+  try {
+    const now = new Date().toISOString();
+    db.prepare('INSERT OR IGNORE INTO email_registries (account_id, website_id, created_at) VALUES (?, ?, ?)')
+      .run(accountId, website.id, now);
+  } catch {
+    console.error('[Registration] 建立注册关系失败:', accountId, website.id);
+  }
 }
 
 // ========== 初始扫描 ==========

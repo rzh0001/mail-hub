@@ -24,7 +24,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // 初始化数据库
-getDatabase();
+try {
+  getDatabase();
+} catch (err) {
+  console.error('[Fatal] 数据库初始化失败，服务器将退出:', err);
+  process.exit(1);
+}
 
 // API 路由
 app.use('/api', accountRoutes);
@@ -51,7 +56,13 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, () => {
   console.log(`[MailHub] 服务已启动: http://localhost:${PORT}`);
   console.log(`[MailHub] API 地址: http://localhost:${PORT}/api`);
-  startSyncScheduler();
+  try {
+    startSyncScheduler();
+  } catch (err) {
+    console.error('[Fatal] 调度器启动失败，服务器将退出:', err);
+    closeDatabase();
+    process.exit(1);
+  }
 
   // 迁移历史脏域名数据（归一化为一级域名）
   try {
@@ -66,6 +77,24 @@ app.listen(PORT, () => {
   } catch (err) {
     console.error('[Registration] 初始扫描失败:', err);
   }
+});
+
+// 全局未捕获异常处理
+process.on('uncaughtException', (err) => {
+  console.error('[Fatal] 未捕获的异常:', err);
+  try {
+    closeDatabase();
+  } catch {}
+  process.exit(1);
+});
+
+// 未处理的 promise rejection
+process.on('unhandledRejection', (reason) => {
+  console.error('[Fatal] 未处理的 promise rejection:', reason);
+  try {
+    closeDatabase();
+  } catch {}
+  process.exit(1);
 });
 
 // 优雅关闭

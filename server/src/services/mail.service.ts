@@ -148,6 +148,8 @@ export async function syncMails(account: AccountRow, folder: string = 'INBOX', m
       pass: account.auth_code,
     },
     logger: false,
+    socketTimeout: 30000,
+    connectionTimeout: 30000,
   });
 
   let synced = 0;
